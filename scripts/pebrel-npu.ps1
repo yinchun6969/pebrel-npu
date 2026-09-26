@@ -191,7 +191,7 @@ function Invoke-Ovms {
 
     & cmd.exe /d /s /c $command
     if ($LASTEXITCODE -ne 0) {
-        throw ("OVMS exited with code " + $LASTEXITCODE + ". If this happened during model pull, rerun the same command: OVMS resumes interrupted LFS downloads. For restricted/slow Hugging Face access you can also pass -HfEndpoint https://hf-mirror.com explicitly.")
+        throw ("OVMS exited with code " + $LASTEXITCODE + ". If this happened during model pull, OVMS can resume interrupted LFS downloads. The model command also retries the official hf-mirror endpoint automatically when the default Hugging Face endpoint fails.")
     }
 }
 
@@ -269,7 +269,7 @@ function Prepare-Model {
     $cache = Join-Path $ModelsRoot ".ov_cache"
 
     Write-Step "Pulling and compiling $Model for NPU. First run can take a while."
-    Invoke-Ovms -Arguments @(
+    $pullArgs = @(
         "--pull",
         "--source_model", $Model,
         "--model_repository_path", $ModelsRoot,
@@ -280,6 +280,19 @@ function Prepare-Model {
         "--enable_prefix_caching", "true",
         "--max_prompt_len", "2000"
     )
+
+    try {
+        Invoke-Ovms -Arguments $pullArgs
+    } catch {
+        if ($HfEndpoint -eq "https://huggingface.co") {
+            Write-Warning "Primary Hugging Face endpoint failed. Retrying automatically with https://hf-mirror.com ..."
+            $env:HF_ENDPOINT = "https://hf-mirror.com"
+            Write-Step ("Fallback model source: " + $env:HF_ENDPOINT)
+            Invoke-Ovms -Arguments $pullArgs
+        } else {
+            throw
+        }
+    }
 
     $modelRelative = $Model -replace "/", "\"
     $modelPath = Join-Path $ModelsRoot $modelRelative
