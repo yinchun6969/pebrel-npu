@@ -134,7 +134,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\pebrel-npu.ps1 setup
 ```
 
-Then select **Settings → AI Providers → Intel NPU (OpenVINO)**. The preset uses `http://127.0.0.1:8000/v1` and does not require an API key.
+Then select **Settings → AI Providers → Intel NPU (OpenVINO)**. The preset uses `http://127.0.0.1:8000/v3` and does not require an API key.
 
 See [Intel NPU documentation](docs/intel-npu.md).
 
