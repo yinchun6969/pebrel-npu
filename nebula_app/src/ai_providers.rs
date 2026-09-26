@@ -79,7 +79,7 @@ impl ProviderKind {
             Self::Anthropic => "https://api.anthropic.com/v1",
             Self::Google => "https://generativelanguage.googleapis.com/v1beta",
             Self::Ollama => "http://localhost:11434/v1",
-            Self::OpenVinoNpu => "http://127.0.0.1:8000/v1",
+            Self::OpenVinoNpu => "http://127.0.0.1:8000/v3",
             Self::OpenRouter => "https://openrouter.ai/api/v1",
             Self::Qwen => "https://dashscope.aliyuncs.com/compatible-mode/v1",
             Self::DeepSeek => "https://api.deepseek.com/v1",
@@ -424,7 +424,7 @@ fn test_url(provider: &AiProvider) -> Result<String, ProviderTestOutcome> {
                 .strip_suffix("/v3")
                 .or_else(|| base.strip_suffix("/v1"))
                 .unwrap_or(base);
-            format!("{root}/v1/models")
+            format!("{root}/v1/config")
         },
         _ => format!("{base}/models"),
     })
@@ -605,6 +605,6 @@ mod tests {
         let azure = AiProvider::preset(ProviderKind::AzureOpenAi, "azure");
         assert!(test_url(&azure).unwrap().contains("/openai/models?api-version="));
         let npu = AiProvider::preset(ProviderKind::OpenVinoNpu, "npu");
-        assert_eq!(test_url(&npu).unwrap(), "http://127.0.0.1:8000/v1/models");
+        assert_eq!(test_url(&npu).unwrap(), "http://127.0.0.1:8000/v1/config");
     }
 }
