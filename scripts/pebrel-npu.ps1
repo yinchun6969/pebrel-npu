@@ -11,7 +11,7 @@ Examples:
 [CmdletBinding()]
 param(
     [Parameter(Position=0)]
-    [ValidateSet("doctor","devices","install","model","repair-tokenizer","repair-file","start","test","stop","setup")]
+    [ValidateSet("doctor","devices","install","model","repair-tokenizer","repair-file","finalize-model","start","test","stop","setup")]
     [string]$Action = "doctor",
 
     [string]$Model = "OpenVINO/Qwen3-8B-int4-cw-ov",
@@ -534,6 +534,67 @@ function Repair-ModelLfsFile([string]$FileName) {
 function Repair-DefaultTokenizer {
     Repair-ModelLfsFile "tokenizer.json"
 }
+function Finalize-LocalModel {
+    $modelDir = Join-Path $ModelsRoot ($Model -replace "/", "\")
+    if (-not (Test-Path $modelDir)) { throw ("Model directory not found: " + $modelDir) }
+
+    $required = @(
+        "added_tokens.json",
+        "chat_template.jinja",
+        "config.json",
+        "generation_config.json",
+        "merges.txt",
+        "openvino_config.json",
+        "openvino_detokenizer.bin",
+        "openvino_detokenizer.xml",
+        "openvino_model.bin",
+        "openvino_model.xml",
+        "openvino_tokenizer.bin",
+        "openvino_tokenizer.xml",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json"
+    )
+
+    $missing = @()
+    foreach ($name in $required) {
+        $p = Join-Path $modelDir $name
+        if (-not (Test-Path $p) -or (Get-Item $p).Length -le 0) { $missing += $name }
+    }
+    if ($missing.Count -gt 0) {
+        throw ("Cannot finalize local model; missing/empty required files: " + ($missing -join ", "))
+    }
+
+    $criticalSizes = @{
+        "openvino_model.bin" = [int64]4700000000
+        "openvino_tokenizer.bin" = [int64]5000000
+        "openvino_detokenizer.bin" = [int64]2000000
+        "tokenizer.json" = [int64]10000000
+    }
+    foreach ($name in $criticalSizes.Keys) {
+        $p = Join-Path $modelDir $name
+        $len = [int64](Get-Item $p).Length
+        if ($len -lt $criticalSizes[$name]) {
+            throw ("Refusing to finalize; " + $name + " is unexpectedly small (" + $len + " bytes).")
+        }
+    }
+
+    $gitPath = Join-Path $modelDir ".git"
+    if (Test-Path $gitPath) {
+        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $backup = Join-Path $modelDir (".git.pebrel-backup-" + $stamp)
+        Write-Step ("Preserving interrupted Git metadata as " + $backup)
+        Move-Item -Path $gitPath -Destination $backup -Force
+    }
+
+    $marker = $modelDir + ".lfswip"
+    Remove-Item $marker -Force -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $modelDir "lfs_error.txt") -Force -ErrorAction SilentlyContinue
+    Get-ChildItem $modelDir -Filter "*.lfs_part" -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
+    Write-Step "Local model finalized. OVMS will now treat this as a user-provided model directory and skip Hugging Face download/resume logic."
+}
 function Prepare-Model {
     # OVMS pull mode uses libgit2 for Hugging Face/LFS. Its defaults are only
     # 4000 ms for connect and transfer operations, which is too aggressive for
@@ -735,6 +796,7 @@ switch ($Action) {
     "model"   { Prepare-Model }
     "repair-tokenizer" { Repair-DefaultTokenizer }
     "repair-file" { Repair-ModelLfsFile $RepairFile }
+    "finalize-model" { Finalize-LocalModel }
     "start"   { Start-Ovms }
     "test"    { Test-NpuChat }
     "stop"    { Stop-Ovms }
