@@ -11,7 +11,7 @@ Examples:
 [CmdletBinding()]
 param(
     [Parameter(Position=0)]
-    [ValidateSet("doctor","devices","install","model","start","test","stop","setup")]
+    [ValidateSet("doctor","devices","install","model","repair-tokenizer","start","test","stop","setup")]
     [string]$Action = "doctor",
 
     [string]$Model = "OpenVINO/Qwen3-8B-int4-cw-ov",
@@ -292,6 +292,52 @@ function Resolve-ModelEndpoint([string]$RequestedEndpoint) {
     throw "No configured model source is reachable on TCP 443."
 }
 
+function Repair-DefaultTokenizer {
+    if ($Model -ne "OpenVINO/Qwen3-8B-int4-cw-ov") {
+        throw "repair-tokenizer currently supports only OpenVINO/Qwen3-8B-int4-cw-ov"
+    }
+
+    $modelDir = Join-Path $ModelsRoot ($Model -replace "/", "\")
+    New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
+
+    $target = Join-Path $modelDir "tokenizer.json"
+    $temp = $target + ".download"
+    $expectedSha256 = "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+    $url = "https://hf-mirror.com/OpenVINO/Qwen3-8B-int4-cw-ov/resolve/main/tokenizer.json?download=true"
+
+    if (-not (Test-EndpointTcp443 "https://hf-mirror.com")) {
+        throw "hf-mirror.com is not reachable on TCP 443; cannot repair tokenizer.json."
+    }
+
+    Remove-Item $temp -Force -ErrorAction SilentlyContinue
+    Write-Step "Downloading tokenizer.json directly from hf-mirror.com to bypass LFS range-resume issues..."
+
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if (-not $curl) { throw "curl.exe was not found on this Windows installation." }
+
+    $curlArgs = @(
+        "--location", "--fail", "--retry", "10", "--retry-delay", "3",
+        "--retry-all-errors", "--connect-timeout", "20", "--max-time", "900",
+        "--output", $temp, $url
+    )
+    & $curl.Source @curlArgs
+
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $temp)) {
+        throw "Direct tokenizer.json download failed."
+    }
+
+    $actual = (Get-FileHash -Path $temp -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $expectedSha256) {
+        Remove-Item $temp -Force -ErrorAction SilentlyContinue
+        throw ("tokenizer.json SHA256 mismatch. Expected " + $expectedSha256 + ", got " + $actual)
+    }
+
+    Move-Item -Path $temp -Destination $target -Force
+    Remove-Item ($target + ".lfs_part") -Force -ErrorAction SilentlyContinue
+
+    Write-Step "tokenizer.json repaired and SHA256 verified."
+    Write-Step ("File: " + $target)
+}
 function Prepare-Model {
     # OVMS pull mode uses libgit2 for Hugging Face/LFS. Its defaults are only
     # 4000 ms for connect and transfer operations, which is too aggressive for
@@ -491,6 +537,7 @@ switch ($Action) {
     "devices" { Show-SuspectDevices }
     "install" { Install-Ovms; Show-Doctor }
     "model"   { Prepare-Model }
+    "repair-tokenizer" { Repair-DefaultTokenizer }
     "start"   { Start-Ovms }
     "test"    { Test-NpuChat }
     "stop"    { Stop-Ovms }
