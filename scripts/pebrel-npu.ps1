@@ -310,19 +310,26 @@ function Repair-DefaultTokenizer {
     }
 
     Remove-Item $temp -Force -ErrorAction SilentlyContinue
-    Write-Step "Downloading tokenizer.json directly from hf-mirror.com to bypass LFS range-resume issues..."
+    Write-Step "Downloading tokenizer.json directly from hf-mirror.com with PowerShell..."
 
-    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
-    if (-not $curl) { throw "curl.exe was not found on this Windows installation." }
+    $downloaded = $false
+    $lastDownloadError = $null
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $temp -UseBasicParsing -TimeoutSec 120
+            if (Test-Path $temp) {
+                $downloaded = $true
+                break
+            }
+        } catch {
+            $lastDownloadError = $_
+            Write-Warning ("tokenizer.json download attempt " + $attempt + "/10 failed: " + $_.Exception.Message)
+            Start-Sleep -Seconds 3
+        }
+    }
 
-    $curlArgs = @(
-        "--location", "--fail", "--retry", "10", "--retry-delay", "3",
-        "--retry-all-errors", "--connect-timeout", "20", "--max-time", "900",
-        "--output", $temp, $url
-    )
-    & $curl.Source @curlArgs
-
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $temp)) {
+    if (-not $downloaded) {
+        if ($lastDownloadError) { throw $lastDownloadError }
         throw "Direct tokenizer.json download failed."
     }
 
