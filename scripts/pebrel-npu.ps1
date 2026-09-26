@@ -329,7 +329,7 @@ function Test-NpuChat {
         )
     } | ConvertTo-Json -Depth 8
 
-    $result = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/chat/completions" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 120
+    $result = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v3/chat/completions" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 120
     $reply = $result.choices[0].message.content
     Write-Host "NPU response: $reply"
 }
@@ -377,7 +377,7 @@ function Show-Doctor {
 
     Write-Host ""
     Write-Host "Pebrel provider defaults:"
-    Write-Host "  Endpoint: http://127.0.0.1:$Port/v1"
+    Write-Host "  Endpoint: http://127.0.0.1:$Port/v3"
     Write-Host "  Model:    $Model"
     Write-Host "  API key:  none"
 }
