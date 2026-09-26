@@ -31,7 +31,7 @@ OpenVINO Model Server
 The built-in provider defaults to:
 
 - Provider: `Intel NPU (OpenVINO)`
-- Base URL: `http://127.0.0.1:8000/v1`
+- Base URL: `http://127.0.0.1:8000/v3`
 - Model: `OpenVINO/Qwen3-8B-int4-cw-ov`
 - API key: not required
 
@@ -136,7 +136,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 默认地址：
 
 ```text
-http://127.0.0.1:8000/v1
+http://127.0.0.1:8000/v3
 ```
 
 默认模型：
