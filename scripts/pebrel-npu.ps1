@@ -11,7 +11,7 @@ Examples:
 [CmdletBinding()]
 param(
     [Parameter(Position=0)]
-    [ValidateSet("doctor","devices","install","model","repair-tokenizer","start","test","stop","setup")]
+    [ValidateSet("doctor","devices","install","model","repair-tokenizer","repair-file","start","test","stop","setup")]
     [string]$Action = "doctor",
 
     [string]$Model = "OpenVINO/Qwen3-8B-int4-cw-ov",
@@ -21,6 +21,7 @@ param(
     [int]$GitTransferTimeoutMs = 600000,
     [int]$LfsResumeAttempts = 20,
     [int]$LfsResumeIntervalSeconds = 15,
+    [string]$RepairFile = "",
     [string]$PebrelNpuHome = (Join-Path $env:LOCALAPPDATA "PebrelNPU")
 )
 
@@ -292,117 +293,142 @@ function Resolve-ModelEndpoint([string]$RequestedEndpoint) {
     throw "No configured model source is reachable on TCP 443."
 }
 
-function Repair-DefaultTokenizer {
-    if ($Model -ne "OpenVINO/Qwen3-8B-int4-cw-ov") {
-        throw "repair-tokenizer currently supports only OpenVINO/Qwen3-8B-int4-cw-ov"
+function Invoke-NoRedirectRequest([string]$Url) {
+    $request = [System.Net.HttpWebRequest]::Create($Url)
+    $request.Method = "GET"
+    $request.AllowAutoRedirect = $false
+    $request.UserAgent = "Pebrel-NPU/1.0"
+    $request.Timeout = 120000
+    $request.ReadWriteTimeout = 120000
+    try {
+        return $request.GetResponse()
+    } catch [System.Net.WebException] {
+        if ($_.Exception.Response) { return $_.Exception.Response }
+        throw
     }
+}
+
+function Resolve-RedirectUrl([string]$Current, [System.Net.WebResponse]$Response) {
+    $status = [int]$Response.StatusCode
+    if ($status -notin 301,302,303,307,308) { return $null }
+    $location = $Response.Headers["Location"]
+    if ([string]::IsNullOrWhiteSpace($location)) {
+        throw ("Redirect " + $status + " did not include a Location header.")
+    }
+    $baseUri = New-Object System.Uri($Current)
+    return (New-Object System.Uri($baseUri, $location)).AbsoluteUri
+}
+
+function Get-TextWithRedirects([string]$InitialUrl) {
+    $current = $InitialUrl
+    for ($redirect = 0; $redirect -lt 12; $redirect++) {
+        $response = Invoke-NoRedirectRequest $current
+        try {
+            $next = Resolve-RedirectUrl -Current $current -Response $response
+            if ($next) {
+                Write-Step ("Redirect " + ([int]$response.StatusCode) + " -> " + $next)
+                $current = $next
+                continue
+            }
+            $status = [int]$response.StatusCode
+            if ($status -lt 200 -or $status -ge 300) { throw ("HTTP " + $status + " for " + $current) }
+            $stream = $response.GetResponseStream()
+            $reader = New-Object System.IO.StreamReader($stream)
+            try { return $reader.ReadToEnd() } finally { $reader.Dispose(); $stream.Dispose() }
+        } finally { $response.Dispose() }
+    }
+    throw "Too many redirects."
+}
+
+function Save-FileWithRedirects([string]$InitialUrl, [string]$Destination) {
+    $current = $InitialUrl
+    for ($redirect = 0; $redirect -lt 12; $redirect++) {
+        $response = Invoke-NoRedirectRequest $current
+        try {
+            $next = Resolve-RedirectUrl -Current $current -Response $response
+            if ($next) {
+                Write-Step ("Redirect " + ([int]$response.StatusCode) + " -> " + $next)
+                $current = $next
+                continue
+            }
+            $status = [int]$response.StatusCode
+            if ($status -lt 200 -or $status -ge 300) { throw ("HTTP " + $status + " for " + $current) }
+            $input = $response.GetResponseStream()
+            $output = [System.IO.File]::Open($Destination,[System.IO.FileMode]::Create,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None)
+            try {
+                $buffer = New-Object byte[] 1048576
+                while (($read = $input.Read($buffer,0,$buffer.Length)) -gt 0) { $output.Write($buffer,0,$read) }
+            } finally {
+                $output.Dispose()
+                $input.Dispose()
+            }
+            return
+        } finally { $response.Dispose() }
+    }
+    throw "Too many redirects."
+}
+
+function Repair-ModelLfsFile([string]$FileName) {
+    if ([string]::IsNullOrWhiteSpace($FileName)) { throw "Repair file name is empty." }
+    if ([System.IO.Path]::GetFileName($FileName) -ne $FileName) { throw "RepairFile must be a single file name, not a path." }
 
     $modelDir = Join-Path $ModelsRoot ($Model -replace "/", "\")
     New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
-
-    $target = Join-Path $modelDir "tokenizer.json"
+    $target = Join-Path $modelDir $FileName
     $temp = $target + ".download"
-    $expectedSha256 = "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
-    $url = "https://hf-mirror.com/OpenVINO/Qwen3-8B-int4-cw-ov/resolve/main/tokenizer.json?download=true"
 
-    if (-not (Test-EndpointTcp443 "https://hf-mirror.com")) {
-        throw "hf-mirror.com is not reachable on TCP 443; cannot repair tokenizer.json."
+    $base = "https://hf-mirror.com/" + $Model
+    $pointerUrl = $base + "/raw/main/" + $FileName
+    $downloadUrl = $base + "/resolve/main/" + $FileName + "?download=true"
+
+    Write-Step ("Reading LFS pointer metadata for " + $FileName + "...")
+    $pointer = Get-TextWithRedirects $pointerUrl
+    $shaMatch = [regex]::Match($pointer, "oid sha256:([0-9a-fA-F]{64})")
+    $sizeMatch = [regex]::Match($pointer, "(?m)^size ([0-9]+)$")
+    if (-not $shaMatch.Success -or -not $sizeMatch.Success) {
+        throw ("Could not parse LFS pointer metadata for " + $FileName)
     }
+    $expectedSha256 = $shaMatch.Groups[1].Value.ToLowerInvariant()
+    $expectedSize = [int64]$sizeMatch.Groups[1].Value
+    Write-Step ("Expected size=" + $expectedSize + " bytes sha256=" + $expectedSha256)
 
     Remove-Item $temp -Force -ErrorAction SilentlyContinue
-    Write-Step "Downloading tokenizer.json directly from hf-mirror.com with explicit redirect handling..."
-
-    function Download-WithRedirects([string]$InitialUrl, [string]$Destination) {
-        $current = $InitialUrl
-        for ($redirect = 0; $redirect -lt 10; $redirect++) {
-            $request = [System.Net.HttpWebRequest]::Create($current)
-            $request.Method = "GET"
-            $request.AllowAutoRedirect = $false
-            $request.UserAgent = "Pebrel-NPU/1.0"
-            $request.Timeout = 120000
-            $request.ReadWriteTimeout = 120000
-
-            $response = $null
-            try {
-                $response = $request.GetResponse()
-            } catch [System.Net.WebException] {
-                if ($_.Exception.Response) {
-                    $response = $_.Exception.Response
-                } else {
-                    throw
-                }
-            }
-
-            try {
-                $status = [int]$response.StatusCode
-                if ($status -in 301,302,303,307,308) {
-                    $location = $response.Headers["Location"]
-                    if ([string]::IsNullOrWhiteSpace($location)) {
-                        throw ("Redirect " + $status + " did not include a Location header.")
-                    }
-                    $baseUri = New-Object System.Uri($current)
-                    $nextUri = New-Object System.Uri($baseUri, $location)
-                    Write-Step ("Redirect " + $status + " -> " + $nextUri.AbsoluteUri)
-                    $current = $nextUri.AbsoluteUri
-                    continue
-                }
-
-                if ($status -lt 200 -or $status -ge 300) {
-                    throw ("HTTP download failed with status " + $status)
-                }
-
-                $input = $response.GetResponseStream()
-                $output = [System.IO.File]::Open($Destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-                try {
-                    $buffer = New-Object byte[] 1048576
-                    while (($read = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
-                        $output.Write($buffer, 0, $read)
-                    }
-                } finally {
-                    if ($output) { $output.Dispose() }
-                    if ($input) { $input.Dispose() }
-                }
-                return
-            } finally {
-                if ($response) { $response.Dispose() }
-            }
-        }
-        throw "Too many redirects while downloading tokenizer.json."
-    }
-
+    $lastError = $null
     $downloaded = $false
-    $lastDownloadError = $null
     for ($attempt = 1; $attempt -le 10; $attempt++) {
         try {
-            Download-WithRedirects -InitialUrl $url -Destination $temp
-            if (Test-Path $temp) {
-                $downloaded = $true
-                break
-            }
+            Write-Step ("Downloading " + $FileName + " (attempt " + $attempt + "/10)...")
+            Save-FileWithRedirects -InitialUrl $downloadUrl -Destination $temp
+            $downloaded = $true
+            break
         } catch {
-            $lastDownloadError = $_
+            $lastError = $_
             Remove-Item $temp -Force -ErrorAction SilentlyContinue
-            Write-Warning ("tokenizer.json download attempt " + $attempt + "/10 failed: " + $_.Exception.Message)
+            Write-Warning ($FileName + " download failed: " + $_.Exception.Message)
             Start-Sleep -Seconds 3
         }
     }
+    if (-not $downloaded) { throw $lastError }
 
-    if (-not $downloaded) {
-        if ($lastDownloadError) { throw $lastDownloadError }
-        throw "Direct tokenizer.json download failed."
-    }
-
-    $actual = (Get-FileHash -Path $temp -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actual -ne $expectedSha256) {
+    $actualSize = (Get-Item $temp).Length
+    if ($actualSize -ne $expectedSize) {
         Remove-Item $temp -Force -ErrorAction SilentlyContinue
-        throw ("tokenizer.json SHA256 mismatch. Expected " + $expectedSha256 + ", got " + $actual)
+        throw ("Size mismatch for " + $FileName + ". Expected " + $expectedSize + ", got " + $actualSize)
+    }
+    $actualSha256 = (Get-FileHash -Path $temp -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualSha256 -ne $expectedSha256) {
+        Remove-Item $temp -Force -ErrorAction SilentlyContinue
+        throw ("SHA256 mismatch for " + $FileName + ". Expected " + $expectedSha256 + ", got " + $actualSha256)
     }
 
     Move-Item -Path $temp -Destination $target -Force
     Remove-Item ($target + ".lfs_part") -Force -ErrorAction SilentlyContinue
+    Remove-Item ($target + ".lfswip") -Force -ErrorAction SilentlyContinue
+    Write-Step ($FileName + " repaired; size and SHA256 verified.")
+}
 
-    Write-Step "tokenizer.json repaired and SHA256 verified."
-    Write-Step ("File: " + $target)
+function Repair-DefaultTokenizer {
+    Repair-ModelLfsFile "tokenizer.json"
 }
 function Prepare-Model {
     # OVMS pull mode uses libgit2 for Hugging Face/LFS. Its defaults are only
@@ -604,6 +630,7 @@ switch ($Action) {
     "install" { Install-Ovms; Show-Doctor }
     "model"   { Prepare-Model }
     "repair-tokenizer" { Repair-DefaultTokenizer }
+    "repair-file" { Repair-ModelLfsFile $RepairFile }
     "start"   { Start-Ovms }
     "test"    { Test-NpuChat }
     "stop"    { Stop-Ovms }
