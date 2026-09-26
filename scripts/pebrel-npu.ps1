@@ -19,6 +19,8 @@ param(
     [string]$HfEndpoint = "https://huggingface.co",
     [int]$GitConnectTimeoutMs = 60000,
     [int]$GitTransferTimeoutMs = 600000,
+    [int]$LfsResumeAttempts = 20,
+    [int]$LfsResumeIntervalSeconds = 15,
     [string]$PebrelNpuHome = (Join-Path $env:LOCALAPPDATA "PebrelNPU")
 )
 
@@ -257,8 +259,11 @@ function Prepare-Model {
     $env:HF_ENDPOINT = $HfEndpoint
     $env:GIT_OPT_SET_SERVER_CONNECT_TIMEOUT = [string]$GitConnectTimeoutMs
     $env:GIT_OPT_SET_SERVER_TIMEOUT = [string]$GitTransferTimeoutMs
+    $env:GIT_LFS_RESUME_ATTEMPTS = [string]$LfsResumeAttempts
+    $env:GIT_LFS_RESUME_INTERVAL_SECONDS = [string]$LfsResumeIntervalSeconds
     Write-Step ("Model source: " + $env:HF_ENDPOINT)
     Write-Step ("Git/LFS timeouts: connect=" + $env:GIT_OPT_SET_SERVER_CONNECT_TIMEOUT + " ms, transfer=" + $env:GIT_OPT_SET_SERVER_TIMEOUT + " ms")
+    Write-Step ("LFS resume: attempts=" + $env:GIT_LFS_RESUME_ATTEMPTS + ", interval=" + $env:GIT_LFS_RESUME_INTERVAL_SECONDS + " s")
 
     $npu = @(Get-IntelNpuDevice)
     if ($npu.Count -eq 0) {
@@ -266,6 +271,10 @@ function Prepare-Model {
     }
 
     New-Item -ItemType Directory -Force -Path $ModelsRoot | Out-Null
+    $resumeMarkers = @(Get-ChildItem $ModelsRoot -Filter "*.lfswip" -File -Recurse -ErrorAction SilentlyContinue)
+    if ($resumeMarkers.Count -gt 0) {
+        Write-Step ("Found " + $resumeMarkers.Count + " persisted LFS resume marker(s); continuing partial downloads instead of restarting.")
+    }
     $cache = Join-Path $ModelsRoot ".ov_cache"
 
     Write-Step "Pulling and compiling $Model for NPU. First run can take a while."
