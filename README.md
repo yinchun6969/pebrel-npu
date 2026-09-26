@@ -123,6 +123,21 @@ each agent's activity, and read its output without leaving the application.
   <img src="docs/screenshots/themes.png" alt="Application themes" width="1040" />
 </p>
 
+## Intel NPU Local AI (Experimental)
+
+This fork adds an **Intel NPU (OpenVINO)** local AI provider for Windows 11 Intel Core Ultra / Intel AI Boost systems.
+
+One-command setup from PowerShell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\pebrel-npu.ps1 setup
+```
+
+Then select **Settings → AI Providers → Intel NPU (OpenVINO)**. The preset uses `http://127.0.0.1:8000/v3` and does not require an API key.
+
+See [Intel NPU documentation](docs/intel-npu.md).
+
 ## Download
 
 Choose a package from the **[latest release](https://github.com/Kuddev/pebrel/releases/latest)**.
