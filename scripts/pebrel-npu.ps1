@@ -252,11 +252,52 @@ function Install-Ovms {
     Write-Step "OVMS ready: $ovms"
 }
 
+function Test-EndpointTcp443([string]$Endpoint, [int]$TimeoutMs = 3000) {
+    try {
+        $uri = [Uri]$Endpoint
+        $client = New-Object System.Net.Sockets.TcpClient
+        $async = $client.BeginConnect($uri.DnsSafeHost, 443, $null, $null)
+        $ok = $async.AsyncWaitHandle.WaitOne($TimeoutMs, $false)
+        if (-not $ok) {
+            $client.Close()
+            return $false
+        }
+        $client.EndConnect($async)
+        $client.Close()
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Resolve-ModelEndpoint([string]$RequestedEndpoint) {
+    if ($RequestedEndpoint -ne "https://huggingface.co") {
+        return $RequestedEndpoint
+    }
+
+    $candidates = @(
+        "https://huggingface.co",
+        "https://hf-mirror.com",
+        "https://www.modelscope.cn/models"
+    )
+    foreach ($candidate in $candidates) {
+        Write-Step ("Checking model source: " + $candidate)
+        if (Test-EndpointTcp443 $candidate) {
+            Write-Step ("Selected reachable model source: " + $candidate)
+            return $candidate
+        }
+        Write-Warning ("Model source is not reachable on TCP 443: " + $candidate)
+    }
+
+    throw "No configured model source is reachable on TCP 443."
+}
+
 function Prepare-Model {
     # OVMS pull mode uses libgit2 for Hugging Face/LFS. Its defaults are only
     # 4000 ms for connect and transfer operations, which is too aggressive for
     # multi-GB models on many consumer networks.
-    $env:HF_ENDPOINT = $HfEndpoint
+    $effectiveHfEndpoint = Resolve-ModelEndpoint $HfEndpoint
+    $env:HF_ENDPOINT = $effectiveHfEndpoint
     $env:GIT_OPT_SET_SERVER_CONNECT_TIMEOUT = [string]$GitConnectTimeoutMs
     $env:GIT_OPT_SET_SERVER_TIMEOUT = [string]$GitTransferTimeoutMs
     $env:GIT_LFS_RESUME_ATTEMPTS = [string]$LfsResumeAttempts
@@ -297,12 +338,16 @@ function Prepare-Model {
             $fallbacks = @(
                 "https://hf-mirror.com",
                 "https://www.modelscope.cn/models"
-            )
+            ) | Where-Object { $_ -ne $effectiveHfEndpoint }
             $lastError = $_
             $succeeded = $false
             foreach ($endpoint in $fallbacks) {
+                if (-not (Test-EndpointTcp443 $endpoint)) {
+                    Write-Warning ("Skipping unreachable fallback model source: " + $endpoint)
+                    continue
+                }
                 try {
-                    Write-Warning ("Primary model source failed. Retrying with " + $endpoint + " ...")
+                    Write-Warning ("Retrying with fallback model source " + $endpoint + " ...")
                     $env:HF_ENDPOINT = $endpoint
                     Write-Step ("Fallback model source: " + $env:HF_ENDPOINT)
                     Invoke-Ovms -Arguments $pullArgs
