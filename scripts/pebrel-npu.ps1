@@ -16,6 +16,9 @@ param(
 
     [string]$Model = "OpenVINO/Qwen3-8B-int4-cw-ov",
     [int]$Port = 8000,
+    [string]$HfEndpoint = "https://huggingface.co",
+    [int]$GitConnectTimeoutMs = 60000,
+    [int]$GitTransferTimeoutMs = 600000,
     [string]$PebrelNpuHome = (Join-Path $env:LOCALAPPDATA "PebrelNPU")
 )
 
@@ -188,7 +191,7 @@ function Invoke-Ovms {
 
     & cmd.exe /d /s /c $command
     if ($LASTEXITCODE -ne 0) {
-        throw "OVMS exited with code $LASTEXITCODE"
+        throw ("OVMS exited with code " + $LASTEXITCODE + ". If this happened during model pull, rerun the same command: OVMS resumes interrupted LFS downloads. For restricted/slow Hugging Face access you can also pass -HfEndpoint https://hf-mirror.com explicitly.")
     }
 }
 
@@ -248,6 +251,15 @@ function Install-Ovms {
 }
 
 function Prepare-Model {
+    # OVMS pull mode uses libgit2 for Hugging Face/LFS. Its defaults are only
+    # 4000 ms for connect and transfer operations, which is too aggressive for
+    # multi-GB models on many consumer networks.
+    $env:HF_ENDPOINT = $HfEndpoint
+    $env:GIT_OPT_SET_SERVER_CONNECT_TIMEOUT = [string]$GitConnectTimeoutMs
+    $env:GIT_OPT_SET_SERVER_TIMEOUT = [string]$GitTransferTimeoutMs
+    Write-Step ("Model source: " + $env:HF_ENDPOINT)
+    Write-Step ("Git/LFS timeouts: connect=" + $env:GIT_OPT_SET_SERVER_CONNECT_TIMEOUT + " ms, transfer=" + $env:GIT_OPT_SET_SERVER_TIMEOUT + " ms")
+
     $npu = @(Get-IntelNpuDevice)
     if ($npu.Count -eq 0) {
         Write-Warning "Windows enumeration did not identify the Intel NPU. Continuing anyway; OVMS --target_device NPU will be the authoritative hardware test."
