@@ -368,6 +368,104 @@ function Save-FileWithRedirects([string]$InitialUrl, [string]$Destination) {
     throw "Too many redirects."
 }
 
+function Save-RangeWithRedirects([string]$InitialUrl, [string]$Destination, [int64]$Start, [int64]$End) {
+    $current = $InitialUrl
+    for ($redirect = 0; $redirect -lt 12; $redirect++) {
+        $request = [System.Net.HttpWebRequest]::Create($current)
+        $request.Method = "GET"
+        $request.AllowAutoRedirect = $false
+        $request.UserAgent = "Pebrel-NPU/1.0"
+        $request.Timeout = 120000
+        $request.ReadWriteTimeout = 120000
+        $request.AddRange($Start, $End)
+
+        $response = $null
+        try {
+            try {
+                $response = $request.GetResponse()
+            } catch [System.Net.WebException] {
+                if ($_.Exception.Response) { $response = $_.Exception.Response } else { throw }
+            }
+
+            $next = Resolve-RedirectUrl -Current $current -Response $response
+            if ($next) {
+                Write-Step ("Redirect " + ([int]$response.StatusCode) + " -> " + $next)
+                $current = $next
+                continue
+            }
+
+            $status = [int]$response.StatusCode
+            if ($status -ne 206) {
+                throw ("Server did not honor byte range " + $Start + "-" + $End + "; HTTP status=" + $status)
+            }
+
+            $remaining = ($End - $Start + 1)
+            $input = $response.GetResponseStream()
+            $output = [System.IO.File]::Open($Destination,[System.IO.FileMode]::OpenOrCreate,[System.IO.FileAccess]::Write,[System.IO.FileShare]::Read)
+            try {
+                $output.Seek($Start,[System.IO.SeekOrigin]::Begin) | Out-Null
+                $buffer = New-Object byte[] 1048576
+                while ($remaining -gt 0) {
+                    $want = [int][Math]::Min([int64]$buffer.Length, $remaining)
+                    $read = $input.Read($buffer,0,$want)
+                    if ($read -le 0) { throw ("Connection ended before range completed; " + $remaining + " bytes still missing.") }
+                    $output.Write($buffer,0,$read)
+                    $remaining -= $read
+                }
+            } finally {
+                $output.Dispose()
+                $input.Dispose()
+            }
+            return
+        } finally {
+            if ($response) { $response.Dispose() }
+        }
+    }
+    throw "Too many redirects during ranged download."
+}
+
+function Save-LargeFileResumable([string]$DownloadUrl, [string]$Target, [int64]$ExpectedSize) {
+    $part = $Target + ".repair_part"
+    $ovmsPart = $Target + ".lfs_part"
+
+    if (-not (Test-Path $part) -and (Test-Path $ovmsPart)) {
+        Write-Step "Adopting the existing OVMS .lfs_part file so completed bytes are not downloaded again."
+        Copy-Item -Path $ovmsPart -Destination $part -Force
+    }
+
+    $offset = 0
+    if (Test-Path $part) { $offset = [int64](Get-Item $part).Length }
+    if ($offset -gt $ExpectedSize) {
+        Remove-Item $part -Force
+        $offset = 0
+    }
+
+    $chunkSize = [int64](64MB)
+    Write-Step ("Large-file resume starts at " + $offset + " / " + $ExpectedSize + " bytes.")
+
+    while ($offset -lt $ExpectedSize) {
+        $end = [Math]::Min($offset + $chunkSize - 1, $ExpectedSize - 1)
+        $done = $false
+        $lastError = $null
+        for ($attempt = 1; $attempt -le 10; $attempt++) {
+            try {
+                Write-Step ("Range " + $offset + "-" + $end + " (attempt " + $attempt + "/10)")
+                Save-RangeWithRedirects -InitialUrl $DownloadUrl -Destination $part -Start $offset -End $end
+                $done = $true
+                break
+            } catch {
+                $lastError = $_
+                Write-Warning ("Range download failed: " + $_.Exception.Message)
+                Start-Sleep -Seconds 3
+            }
+        }
+        if (-not $done) { throw $lastError }
+        $offset = [int64](Get-Item $part).Length
+        if ($offset -lt ($end + 1)) { throw "Ranged download did not advance to the expected offset." }
+    }
+
+    Move-Item -Path $part -Destination ($Target + ".download") -Force
+}
 function Repair-ModelLfsFile([string]$FileName) {
     if ([string]::IsNullOrWhiteSpace($FileName)) { throw "Repair file name is empty." }
     if ([System.IO.Path]::GetFileName($FileName) -ne $FileName) { throw "RepairFile must be a single file name, not a path." }
@@ -392,23 +490,29 @@ function Repair-ModelLfsFile([string]$FileName) {
     $expectedSize = [int64]$sizeMatch.Groups[1].Value
     Write-Step ("Expected size=" + $expectedSize + " bytes sha256=" + $expectedSha256)
 
-    Remove-Item $temp -Force -ErrorAction SilentlyContinue
-    $lastError = $null
-    $downloaded = $false
-    for ($attempt = 1; $attempt -le 10; $attempt++) {
-        try {
-            Write-Step ("Downloading " + $FileName + " (attempt " + $attempt + "/10)...")
-            Save-FileWithRedirects -InitialUrl $downloadUrl -Destination $temp
-            $downloaded = $true
-            break
-        } catch {
-            $lastError = $_
-            Remove-Item $temp -Force -ErrorAction SilentlyContinue
-            Write-Warning ($FileName + " download failed: " + $_.Exception.Message)
-            Start-Sleep -Seconds 3
+    $largeThreshold = [int64](256MB)
+    if ($expectedSize -ge $largeThreshold) {
+        Write-Step ("Large LFS file detected (" + $expectedSize + " bytes); using 64 MiB ranged resume.")
+        Save-LargeFileResumable -DownloadUrl $downloadUrl -Target $target -ExpectedSize $expectedSize
+    } else {
+        Remove-Item $temp -Force -ErrorAction SilentlyContinue
+        $lastError = $null
+        $downloaded = $false
+        for ($attempt = 1; $attempt -le 10; $attempt++) {
+            try {
+                Write-Step ("Downloading " + $FileName + " (attempt " + $attempt + "/10)...")
+                Save-FileWithRedirects -InitialUrl $downloadUrl -Destination $temp
+                $downloaded = $true
+                break
+            } catch {
+                $lastError = $_
+                Remove-Item $temp -Force -ErrorAction SilentlyContinue
+                Write-Warning ($FileName + " download failed: " + $_.Exception.Message)
+                Start-Sleep -Seconds 3
+            }
         }
+        if (-not $downloaded) { throw $lastError }
     }
-    if (-not $downloaded) { throw $lastError }
 
     $actualSize = (Get-Item $temp).Length
     if ($actualSize -ne $expectedSize) {
