@@ -310,19 +310,78 @@ function Repair-DefaultTokenizer {
     }
 
     Remove-Item $temp -Force -ErrorAction SilentlyContinue
-    Write-Step "Downloading tokenizer.json directly from hf-mirror.com with PowerShell..."
+    Write-Step "Downloading tokenizer.json directly from hf-mirror.com with explicit redirect handling..."
+
+    function Download-WithRedirects([string]$InitialUrl, [string]$Destination) {
+        $current = $InitialUrl
+        for ($redirect = 0; $redirect -lt 10; $redirect++) {
+            $request = [System.Net.HttpWebRequest]::Create($current)
+            $request.Method = "GET"
+            $request.AllowAutoRedirect = $false
+            $request.UserAgent = "Pebrel-NPU/1.0"
+            $request.Timeout = 120000
+            $request.ReadWriteTimeout = 120000
+
+            $response = $null
+            try {
+                $response = $request.GetResponse()
+            } catch [System.Net.WebException] {
+                if ($_.Exception.Response) {
+                    $response = $_.Exception.Response
+                } else {
+                    throw
+                }
+            }
+
+            try {
+                $status = [int]$response.StatusCode
+                if ($status -in 301,302,303,307,308) {
+                    $location = $response.Headers["Location"]
+                    if ([string]::IsNullOrWhiteSpace($location)) {
+                        throw ("Redirect " + $status + " did not include a Location header.")
+                    }
+                    $baseUri = New-Object System.Uri($current)
+                    $nextUri = New-Object System.Uri($baseUri, $location)
+                    Write-Step ("Redirect " + $status + " -> " + $nextUri.AbsoluteUri)
+                    $current = $nextUri.AbsoluteUri
+                    continue
+                }
+
+                if ($status -lt 200 -or $status -ge 300) {
+                    throw ("HTTP download failed with status " + $status)
+                }
+
+                $input = $response.GetResponseStream()
+                $output = [System.IO.File]::Open($Destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+                try {
+                    $buffer = New-Object byte[] 1048576
+                    while (($read = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                        $output.Write($buffer, 0, $read)
+                    }
+                } finally {
+                    if ($output) { $output.Dispose() }
+                    if ($input) { $input.Dispose() }
+                }
+                return
+            } finally {
+                if ($response) { $response.Dispose() }
+            }
+        }
+        throw "Too many redirects while downloading tokenizer.json."
+    }
 
     $downloaded = $false
     $lastDownloadError = $null
     for ($attempt = 1; $attempt -le 10; $attempt++) {
         try {
-            Invoke-WebRequest -Uri $url -OutFile $temp -UseBasicParsing -TimeoutSec 120
+            Download-WithRedirects -InitialUrl $url -Destination $temp
             if (Test-Path $temp) {
                 $downloaded = $true
                 break
             }
         } catch {
             $lastDownloadError = $_
+            Remove-Item $temp -Force -ErrorAction SilentlyContinue
             Write-Warning ("tokenizer.json download attempt " + $attempt + "/10 failed: " + $_.Exception.Message)
             Start-Sleep -Seconds 3
         }
