@@ -430,7 +430,7 @@ function Save-LargeFileResumable([string]$DownloadUrl, [string]$Target, [int64]$
 
     if (-not (Test-Path $part) -and (Test-Path $ovmsPart)) {
         Write-Step "Adopting the existing OVMS .lfs_part file so completed bytes are not downloaded again."
-        Copy-Item -Path $ovmsPart -Destination $part -Force
+        Move-Item -Path $ovmsPart -Destination $part -Force
     }
 
     $offset = 0
