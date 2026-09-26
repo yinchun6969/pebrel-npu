@@ -11,7 +11,7 @@ Examples:
 [CmdletBinding()]
 param(
     [Parameter(Position=0)]
-    [ValidateSet("doctor","install","model","start","test","stop","setup")]
+    [ValidateSet("doctor","devices","install","model","start","test","stop","setup")]
     [string]$Action = "doctor",
 
     [string]$Model = "OpenVINO/Qwen3-8B-int4-cw-ov",
@@ -33,13 +33,95 @@ function Write-Step([string]$Text) {
 }
 
 function Get-IntelNpuDevice {
-    $devices = Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
+    $found = @()
+
+    # Newer Windows builds expose the NPU more reliably through Get-PnpDevice
+    # than Win32_PnPEntity. Intel has used both "Intel(R) AI Boost" and
+    # "Intel(R) NPU Accelerator" product names across driver generations.
+    if (Get-Command Get-PnpDevice -ErrorAction SilentlyContinue) {
+        $found += Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+            Where-Object {
+                $name = [string]$_.FriendlyName
+                $class = [string]$_.Class
+                $id = [string]$_.InstanceId
+                (
+                    $name -match '(?i)Intel.*(AI Boost|NPU|Neural|VPU)' -or
+                    ($id -match '(?i)^PCI\\VEN_8086' -and $class -match '(?i)Neural|Compute|Accelerator')
+                )
+            } |
+            ForEach-Object {
+                [pscustomobject]@{
+                    Name = $_.FriendlyName
+                    Status = $_.Status
+                    Class = $_.Class
+                    DeviceId = $_.InstanceId
+                    Source = "Get-PnpDevice"
+                }
+            }
+    }
+
+    $found += Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
         Where-Object {
-            $_.Name -match "Intel.*AI Boost" -or
-            $_.Name -match "Intel.*NPU" -or
-            $_.Name -match "Neural Processing"
+            $text = "$($_.Name) $($_.Caption) $($_.Description) $($_.PNPClass)"
+            $text -match '(?i)Intel.*(AI Boost|NPU|Neural|VPU)' -or
+            (($_.DeviceID -match '(?i)^PCI\\VEN_8086') -and ($_.PNPClass -match '(?i)Neural|Compute|Accelerator'))
+        } |
+        ForEach-Object {
+            [pscustomobject]@{
+                Name = $_.Name
+                Status = $_.Status
+                Class = $_.PNPClass
+                DeviceId = $_.DeviceID
+                Source = "Win32_PnPEntity"
+            }
         }
-    return @($devices)
+
+    $found += Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue |
+        Where-Object {
+            "$($_.DeviceName) $($_.DeviceClass)" -match '(?i)Intel.*(AI Boost|NPU|Neural|VPU)'
+        } |
+        ForEach-Object {
+            [pscustomobject]@{
+                Name = $_.DeviceName
+                Status = "Driver installed"
+                Class = $_.DeviceClass
+                DeviceId = $_.DeviceID
+                Source = "Win32_PnPSignedDriver"
+            }
+        }
+
+    return @(
+        $found |
+            Where-Object { $_.Name -or $_.DeviceId } |
+            Sort-Object DeviceId, Name -Unique
+    )
+}
+
+function Show-SuspectDevices {
+    Write-Host ""
+    Write-Host "Windows NPU / accelerator candidates" -ForegroundColor White
+    Write-Host "------------------------------------"
+
+    $rows = @()
+    if (Get-Command Get-PnpDevice -ErrorAction SilentlyContinue) {
+        $rows += Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.FriendlyName -match '(?i)AI Boost|NPU|Neural|VPU|Accelerator' -or
+                ($_.InstanceId -match '(?i)^PCI\\VEN_8086' -and $_.Class -match '(?i)Neural|Compute|Accelerator')
+            } |
+            Select-Object Status, Class, FriendlyName, InstanceId
+    }
+
+    if ($rows.Count -eq 0) {
+        Write-Host "No obvious NPU candidate was returned by Get-PnpDevice." -ForegroundColor Yellow
+        Write-Host "Intel display/driver records that may help diagnosis:"
+        Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue |
+            Where-Object { $_.Manufacturer -match '(?i)Intel' -and $_.DeviceName -match '(?i)AI|NPU|Neural|VPU|Accelerator' } |
+            Select-Object DeviceName, DeviceClass, DriverVersion, DeviceID |
+            Format-Table -AutoSize
+    } else {
+        $rows | Format-Table -AutoSize
+    }
 }
 
 function Get-OvmsExe {
@@ -160,7 +242,7 @@ function Install-Ovms {
 function Prepare-Model {
     $npu = Get-IntelNpuDevice
     if ($npu.Count -eq 0) {
-        throw "Intel NPU was not detected by Windows. Update the Intel NPU driver first."
+        Write-Warning "Windows enumeration did not identify the Intel NPU. Continuing anyway; OVMS --target_device NPU will be the authoritative hardware test."
     }
 
     New-Item -ItemType Directory -Force -Path $ModelsRoot | Out-Null
@@ -260,11 +342,16 @@ function Show-Doctor {
     $npu = Get-IntelNpuDevice
     if ($npu.Count -gt 0) {
         foreach ($d in $npu) {
-            Write-Host ("[OK] NPU device: " + $d.Name) -ForegroundColor Green
+            Write-Host ("[OK] NPU candidate: " + $d.Name) -ForegroundColor Green
             if ($d.Status) { Write-Host ("     status: " + $d.Status) }
+            if ($d.Class) { Write-Host ("     class:  " + $d.Class) }
+            if ($d.Source) { Write-Host ("     source: " + $d.Source) }
         }
     } else {
-        Write-Host "[FAIL] Intel NPU / AI Boost device not detected" -ForegroundColor Red
+        Write-Host "[WARN] Windows inventory did not expose an Intel NPU through the known APIs." -ForegroundColor Yellow
+        Write-Host "       This does NOT prove the NPU is absent. If Task Manager shows NPU, run:" -ForegroundColor Yellow
+        Write-Host "       .\scripts\pebrel-npu.ps1 devices" -ForegroundColor Yellow
+        Write-Host "       The authoritative test is OVMS with --target_device NPU." -ForegroundColor Yellow
     }
 
     $ovms = Get-OvmsExe
@@ -297,6 +384,7 @@ function Show-Doctor {
 
 switch ($Action) {
     "doctor"  { Show-Doctor }
+    "devices" { Show-SuspectDevices }
     "install" { Install-Ovms; Show-Doctor }
     "model"   { Prepare-Model }
     "start"   { Start-Ovms }
