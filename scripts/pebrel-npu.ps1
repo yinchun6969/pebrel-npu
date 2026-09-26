@@ -97,6 +97,14 @@ function Get-IntelNpuDevice {
     )
 }
 
+function Get-IntelNpuDriverVersion {
+    $driver = Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue |
+        Where-Object { $_.DeviceName -match '(?i)^Intel.*(AI Boost|NPU|Neural|VPU)' } |
+        Select-Object -First 1
+    if ($driver) { return [string]$driver.DriverVersion }
+    return $null
+}
+
 function Show-SuspectDevices {
     Write-Host ""
     Write-Host "Windows NPU / accelerator candidates" -ForegroundColor White
@@ -240,7 +248,7 @@ function Install-Ovms {
 }
 
 function Prepare-Model {
-    $npu = Get-IntelNpuDevice
+    $npu = @(Get-IntelNpuDevice)
     if ($npu.Count -eq 0) {
         Write-Warning "Windows enumeration did not identify the Intel NPU. Continuing anyway; OVMS --target_device NPU will be the authoritative hardware test."
     }
@@ -339,7 +347,7 @@ function Show-Doctor {
     Write-Host "Pebrel NPU doctor" -ForegroundColor White
     Write-Host "-----------------"
 
-    $npu = Get-IntelNpuDevice
+    $npu = @(Get-IntelNpuDevice)
     if ($npu.Count -gt 0) {
         foreach ($d in $npu) {
             Write-Host ("[OK] NPU candidate: " + $d.Name) -ForegroundColor Green
@@ -347,6 +355,8 @@ function Show-Doctor {
             if ($d.Class) { Write-Host ("     class:  " + $d.Class) }
             if ($d.Source) { Write-Host ("     source: " + $d.Source) }
         }
+        $driverVersion = Get-IntelNpuDriverVersion
+        if ($driverVersion) { Write-Host ("[OK] Intel NPU driver: " + $driverVersion) -ForegroundColor Green }
     } else {
         Write-Host "[WARN] Windows inventory did not expose an Intel NPU through the known APIs." -ForegroundColor Yellow
         Write-Host "       This does NOT prove the NPU is absent. If Task Manager shows NPU, run:" -ForegroundColor Yellow
