@@ -285,10 +285,25 @@ function Prepare-Model {
         Invoke-Ovms -Arguments $pullArgs
     } catch {
         if ($HfEndpoint -eq "https://huggingface.co") {
-            Write-Warning "Primary Hugging Face endpoint failed. Retrying automatically with https://hf-mirror.com ..."
-            $env:HF_ENDPOINT = "https://hf-mirror.com"
-            Write-Step ("Fallback model source: " + $env:HF_ENDPOINT)
-            Invoke-Ovms -Arguments $pullArgs
+            $fallbacks = @(
+                "https://hf-mirror.com",
+                "https://www.modelscope.cn/models"
+            )
+            $lastError = $_
+            $succeeded = $false
+            foreach ($endpoint in $fallbacks) {
+                try {
+                    Write-Warning ("Primary model source failed. Retrying with " + $endpoint + " ...")
+                    $env:HF_ENDPOINT = $endpoint
+                    Write-Step ("Fallback model source: " + $env:HF_ENDPOINT)
+                    Invoke-Ovms -Arguments $pullArgs
+                    $succeeded = $true
+                    break
+                } catch {
+                    $lastError = $_
+                }
+            }
+            if (-not $succeeded) { throw $lastError }
         } else {
             throw
         }
@@ -362,7 +377,7 @@ function Test-NpuChat {
         )
     } | ConvertTo-Json -Depth 8
 
-    $result = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v3/chat/completions" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 120
+    $result = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/chat/completions" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 120
     $reply = $result.choices[0].message.content
     Write-Host "NPU response: $reply"
 }
@@ -412,7 +427,7 @@ function Show-Doctor {
 
     Write-Host ""
     Write-Host "Pebrel provider defaults:"
-    Write-Host "  Endpoint: http://127.0.0.1:$Port/v3"
+    Write-Host "  Endpoint: http://127.0.0.1:$Port/v1"
     Write-Host "  Model:    $Model"
     Write-Host "  API key:  none"
 }
