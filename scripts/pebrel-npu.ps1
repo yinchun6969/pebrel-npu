@@ -204,7 +204,7 @@ function Start-Ovms {
     }
 
     Remove-Item $LogPath -Force -ErrorAction SilentlyContinue
-    $proc = Invoke-Ovms -Arguments @("--rest_port", "$Port", "--config_path", $ConfigPath) -Detached
+    $proc = Invoke-Ovms -Arguments @("--rest_port", "$Port", "--rest_bind_address", "127.0.0.1", "--config_path", $ConfigPath) -Detached
 
     Write-Step "Started OVMS PID $($proc.Id) on http://127.0.0.1:$Port"
     for ($i = 0; $i -lt 60; $i++) {
@@ -247,7 +247,7 @@ function Test-NpuChat {
         )
     } | ConvertTo-Json -Depth 8
 
-    $result = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v3/chat/completions" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 120
+    $result = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/chat/completions" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 120
     $reply = $result.choices[0].message.content
     Write-Host "NPU response: $reply"
 }
@@ -290,7 +290,7 @@ function Show-Doctor {
 
     Write-Host ""
     Write-Host "Pebrel provider defaults:"
-    Write-Host "  Endpoint: http://127.0.0.1:$Port/v3"
+    Write-Host "  Endpoint: http://127.0.0.1:$Port/v1"
     Write-Host "  Model:    $Model"
     Write-Host "  API key:  none"
 }
