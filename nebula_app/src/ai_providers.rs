@@ -79,7 +79,7 @@ impl ProviderKind {
             Self::Anthropic => "https://api.anthropic.com/v1",
             Self::Google => "https://generativelanguage.googleapis.com/v1beta",
             Self::Ollama => "http://localhost:11434/v1",
-            Self::OpenVinoNpu => "http://127.0.0.1:8000/v1",
+            Self::OpenVinoNpu => "http://127.0.0.1:8000/v3",
             Self::OpenRouter => "https://openrouter.ai/api/v1",
             Self::Qwen => "https://dashscope.aliyuncs.com/compatible-mode/v1",
             Self::DeepSeek => "https://api.deepseek.com/v1",
