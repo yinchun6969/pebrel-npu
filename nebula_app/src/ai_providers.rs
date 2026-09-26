@@ -24,6 +24,7 @@ pub enum ProviderKind {
     Anthropic,
     Google,
     Ollama,
+    OpenVinoNpu,
     OpenRouter,
     Qwen,
     DeepSeek,
@@ -36,11 +37,12 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const PRESETS: [Self; 13] = [
+    pub const PRESETS: [Self; 14] = [
         Self::OpenAi,
         Self::Anthropic,
         Self::Google,
         Self::Ollama,
+        Self::OpenVinoNpu,
         Self::OpenRouter,
         Self::Qwen,
         Self::DeepSeek,
@@ -58,6 +60,7 @@ impl ProviderKind {
             Self::Anthropic => "Anthropic",
             Self::Google => "Google",
             Self::Ollama => "Ollama",
+            Self::OpenVinoNpu => "Intel NPU (OpenVINO)",
             Self::OpenRouter => "OpenRouter",
             Self::Qwen => "Qwen",
             Self::DeepSeek => "DeepSeek",
@@ -76,6 +79,7 @@ impl ProviderKind {
             Self::Anthropic => "https://api.anthropic.com/v1",
             Self::Google => "https://generativelanguage.googleapis.com/v1beta",
             Self::Ollama => "http://localhost:11434/v1",
+            Self::OpenVinoNpu => "http://127.0.0.1:8000/v3",
             Self::OpenRouter => "https://openrouter.ai/api/v1",
             Self::Qwen => "https://dashscope.aliyuncs.com/compatible-mode/v1",
             Self::DeepSeek => "https://api.deepseek.com/v1",
@@ -94,6 +98,7 @@ impl ProviderKind {
             Self::Anthropic => "claude-sonnet-4-5",
             Self::Google => "gemini-2.5-flash",
             Self::Ollama => "qwen3",
+            Self::OpenVinoNpu => "OpenVINO/Qwen3-8B-int4-cw-ov",
             Self::OpenRouter => "openai/gpt-5.4-mini",
             Self::Qwen => "qwen3.7-plus",
             Self::DeepSeek => "deepseek-chat",
@@ -107,7 +112,7 @@ impl ProviderKind {
     }
 
     pub fn requires_api_key(self) -> bool {
-        !matches!(self, Self::Ollama)
+        !matches!(self, Self::Ollama | Self::OpenVinoNpu)
     }
 
     pub fn uses_openai_protocol(self) -> bool {
@@ -414,6 +419,13 @@ fn test_url(provider: &AiProvider) -> Result<String, ProviderTestOutcome> {
             let resource = base.strip_suffix("/openai/deployments").unwrap_or(base);
             format!("{resource}/openai/models?api-version=2024-10-21")
         },
+        ProviderKind::OpenVinoNpu => {
+            let root = base
+                .strip_suffix("/v3")
+                .or_else(|| base.strip_suffix("/v1"))
+                .unwrap_or(base);
+            format!("{root}/v1/models")
+        },
         _ => format!("{base}/models"),
     })
 }
@@ -592,5 +604,7 @@ mod tests {
         assert_eq!(test_url(&openai).unwrap(), "https://api.openai.com/v1/models");
         let azure = AiProvider::preset(ProviderKind::AzureOpenAi, "azure");
         assert!(test_url(&azure).unwrap().contains("/openai/models?api-version="));
+        let npu = AiProvider::preset(ProviderKind::OpenVinoNpu, "npu");
+        assert_eq!(test_url(&npu).unwrap(), "http://127.0.0.1:8000/v1/models");
     }
 }
