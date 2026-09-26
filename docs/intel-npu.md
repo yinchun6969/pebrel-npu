@@ -31,7 +31,7 @@ OpenVINO Model Server
 The built-in provider defaults to:
 
 - Provider: `Intel NPU (OpenVINO)`
-- Base URL: `http://127.0.0.1:8000/v3`
+- Base URL: `http://127.0.0.1:8000/v1`
 - Model: `OpenVINO/Qwen3-8B-int4-cw-ov`
 - API key: not required
 
@@ -53,7 +53,7 @@ The setup action:
 3. Verifies the published SHA-256 checksum when available.
 4. Pulls the NPU-ready OpenVINO Qwen3 INT4 model.
 5. Builds an OVMS config targeting `NPU`.
-6. Starts OVMS locally on port 8000.
+6. Starts OVMS on 127.0.0.1:8000 only.
 7. Runs a small OpenAI-compatible chat request.
 
 Runtime files are stored under:
@@ -108,7 +108,7 @@ analysis and command suggestions.
   summarization, classification, and other low-power AI tasks.
 - Initial model download and NPU compilation can take time.
 - NPU LLM support has model/quantization constraints; use models prepared for OpenVINO NPU.
-- OVMS is bound by the script to the local machine workflow; do not expose the inference
+- OVMS is explicitly bound to 127.0.0.1 by the script; do not expose the inference
   port publicly unless you add authentication and appropriate network controls.
 
 ---
@@ -136,7 +136,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 默认地址：
 
 ```text
-http://127.0.0.1:8000/v3
+http://127.0.0.1:8000/v1
 ```
 
 默认模型：
