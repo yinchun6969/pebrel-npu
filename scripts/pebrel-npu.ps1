@@ -719,8 +719,12 @@ function Stop-Ovms {
 }
 
 function Test-NpuChat {
-    $models = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/models" -TimeoutSec 5
-    Write-Step ("OVMS models endpoint OK. Models: " + (($models.data.id) -join ", "))
+    $cfg = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/config" -TimeoutSec 10
+    $cfgJson = $cfg | ConvertTo-Json -Depth 8
+    if ($cfgJson -notmatch [regex]::Escape($Model)) {
+        throw ("OVMS is running but the requested model is not present in /v1/config: " + $Model)
+    }
+    Write-Step ("OVMS config endpoint OK. Model is registered: " + $Model)
 
     $body = @{
         model = $Model
@@ -734,7 +738,7 @@ function Test-NpuChat {
         )
     } | ConvertTo-Json -Depth 8
 
-    $result = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/chat/completions" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 120
+    $result = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v3/chat/completions" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 180
     $reply = $result.choices[0].message.content
     Write-Host "NPU response: $reply"
 }
@@ -784,7 +788,7 @@ function Show-Doctor {
 
     Write-Host ""
     Write-Host "Pebrel provider defaults:"
-    Write-Host "  Endpoint: http://127.0.0.1:$Port/v1"
+    Write-Host "  Endpoint: http://127.0.0.1:$Port/v3"
     Write-Host "  Model:    $Model"
     Write-Host "  API key:  none"
 }
