@@ -34,6 +34,7 @@ impl NebulaWorkspace {
                 | PaletteAction::PrevTab
                 | PaletteAction::ToggleSidebar
                 | PaletteAction::OpenSettings
+                | PaletteAction::OpenAiChat
                 | PaletteAction::ToggleGhost
                 | PaletteAction::CycleAccept
                 | PaletteAction::CycleCompletionStyle
