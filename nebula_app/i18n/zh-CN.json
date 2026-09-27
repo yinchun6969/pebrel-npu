@@ -185,6 +185,25 @@
       "needs_repair": "Hook 已安装 · 需修复",
       "initialize": "请先运行一次此工具以创建配置，然后刷新。",
       "config_path": "配置：{path}"
+    },
+    "npu_runtime": {
+      "title": "Intel NPU 运行服务",
+      "description": "管理此供应商使用的本地 OpenVINO Model Server。Pebrel 只启停自己管理的回环地址服务。",
+      "status_unknown": "尚未检测状态",
+      "status_unsupported": "目前仅 Windows 支持运行服务管理",
+      "status_not_installed": "尚未安装 OVMS 运行时",
+      "status_not_configured": "缺少模型配置",
+      "status_stopped": "已停止",
+      "status_running": "运行中 · 模型可用",
+      "status_running_model_unavailable": "运行中 · 模型尚不可用",
+      "status_running_unmanaged": "外部服务正在运行 · Pebrel 不会强制停止",
+      "status_error": "运行服务错误：{error}",
+      "action_refresh": "刷新状态",
+      "action_refreshing": "刷新中…",
+      "action_start": "启动 NPU",
+      "action_starting": "启动中…",
+      "action_stop": "停止 NPU",
+      "action_stopping": "停止中…"
     }
   },
   "provider": {
