@@ -11,6 +11,7 @@ pub(super) const STATIC_DEFAULT_COMBOS: &[&str] = &[
     "ctrl-shift-w",
     "ctrl-shift-b",
     "ctrl-,",
+    "ctrl-shift-a",
     "ctrl-shift-p",
     "ctrl-k",
     "ctrl-shift-f",
