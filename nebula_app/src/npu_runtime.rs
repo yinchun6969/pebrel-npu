@@ -127,8 +127,67 @@ fn probe_model(model: &str, port: u16) -> Result<bool, ProbeError> {
     Ok(available)
 }
 
-fn read_pid(path: &Path) -> Option<u32> {
-    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ManagedPid {
+    pid: u32,
+    creation_filetime: u64,
+}
+
+fn read_pid_record(path: &Path) -> Option<ManagedPid> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let (pid, creation) = text.trim().split_once('|')?;
+    Some(ManagedPid {
+        pid: pid.parse().ok()?,
+        creation_filetime: creation.parse().ok()?,
+    })
+}
+
+#[cfg(windows)]
+fn process_creation_filetime(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return None;
+    }
+    let mut creation = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let mut exit = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let mut kernel = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let mut user = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let ok = unsafe { GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) };
+    unsafe {
+        CloseHandle(handle);
+    }
+    if ok == 0 {
+        return None;
+    }
+    Some((u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime))
+}
+
+fn managed_pid(path: &Path) -> Option<u32> {
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        None
+    }
+
+    #[cfg(windows)]
+    {
+        let record = read_pid_record(path)?;
+        (process_creation_filetime(record.pid) == Some(record.creation_filetime))
+            .then_some(record.pid)
+    }
+}
+
+#[cfg(windows)]
+fn write_pid_record(path: &Path, pid: u32) -> Result<(), String> {
+    let creation = process_creation_filetime(pid)
+        .ok_or_else(|| format!("Could not read creation time for managed OVMS PID {pid}"))?;
+    std::fs::write(path, format!("{pid}|{creation}"))
+        .map_err(|error| format!("OVMS started, but its PID record could not be saved: {error}"))
 }
 
 fn find_named_file(root: &Path, name: &str) -> Option<PathBuf> {
@@ -161,7 +220,7 @@ fn inspect_with_paths(model: &str, port: u16, paths: &RuntimePaths) -> NpuRuntim
     match probe_model(model, port) {
         Ok(model_available) => {
             return NpuRuntimeStatus::Running {
-                managed: read_pid(&paths.pid).is_some(),
+                managed: managed_pid(&paths.pid).is_some(),
                 model_available,
             };
         },
@@ -282,8 +341,7 @@ pub fn start(model: &str, base_url: &str) -> Result<NpuRuntimeStatus, String> {
         }
 
         let mut child = spawn_hidden_ovms(&paths, port)?;
-        std::fs::write(&paths.pid, child.id().to_string())
-            .map_err(|error| format!("OVMS started, but its PID could not be saved: {error}"))?;
+        write_pid_record(&paths.pid, child.id())?;
 
         for _ in 0..240 {
             if let Some(status) = child
@@ -338,8 +396,8 @@ pub fn stop(model: &str, base_url: &str) -> Result<NpuRuntimeStatus, String> {
             return Ok(before);
         }
 
-        let pid = read_pid(&paths.pid).ok_or_else(|| {
-            "OVMS is running, but Pebrel does not own its PID. Stop that external OVMS process manually."
+        let pid = managed_pid(&paths.pid).ok_or_else(|| {
+            "OVMS is running, but Pebrel does not have a valid ownership record for its process. Stop that external or legacy OVMS process manually."
                 .to_owned()
         })?;
         let status = Command::new("taskkill.exe")
