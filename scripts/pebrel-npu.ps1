@@ -832,10 +832,6 @@ function Install-PebrelNpuShortcuts {
     $exe = Resolve-PebrelExe
     $desktop = [Environment]::GetFolderPath("Desktop")
     $shell = New-Object -ComObject WScript.Shell
-    $cmd = $env:ComSpec
-    if ([string]::IsNullOrWhiteSpace($cmd)) {
-        $cmd = Join-Path $env:SystemRoot "System32\cmd.exe"
-    }
 
     # Remove every older variant before recreating the launchers so stale
     # shortcuts cannot keep pointing at an obsolete helper copied earlier.
@@ -850,10 +846,11 @@ function Install-PebrelNpuShortcuts {
     $startCmd = Join-Path $PebrelNpuHome "Start Pebrel NPU.cmd"
     $stopCmd = Join-Path $PebrelNpuHome "Stop Pebrel NPU.cmd"
 
+    $startCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" launch -PebrelExe "{1}"' -f $stableScript, $exe
     $startLines = @(
         "@echo off",
         "setlocal",
-        'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $stableScript + '" launch -PebrelExe "' + $exe + '"',
+        $startCommand,
         'set "RC=%ERRORLEVEL%"',
         'if not "%RC%"=="0" (',
         '  echo.',
@@ -865,10 +862,11 @@ function Install-PebrelNpuShortcuts {
     )
     Set-Content -Path $startCmd -Value $startLines -Encoding ascii
 
+    $stopCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" stop' -f $stableScript
     $stopLines = @(
         "@echo off",
         "setlocal",
-        'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $stableScript + '" stop',
+        $stopCommand,
         'set "RC=%ERRORLEVEL%"',
         'if not "%RC%"=="0" (',
         '  echo.',
@@ -885,8 +883,8 @@ function Install-PebrelNpuShortcuts {
 
     $startPath = Join-Path $desktop "Start Pebrel NPU.lnk"
     $launchLink = $shell.CreateShortcut($startPath)
-    $launchLink.TargetPath = $cmd
-    $launchLink.Arguments = '/d /c ""' + $startCmd + '""'
+    $launchLink.TargetPath = $startCmd
+    $launchLink.Arguments = ""
     $launchLink.WorkingDirectory = Split-Path $exe -Parent
     $launchLink.IconLocation = $exe + ",0"
     $launchLink.WindowStyle = 1
@@ -895,8 +893,8 @@ function Install-PebrelNpuShortcuts {
 
     $stopPath = Join-Path $desktop "Stop Pebrel NPU.lnk"
     $stopLink = $shell.CreateShortcut($stopPath)
-    $stopLink.TargetPath = $cmd
-    $stopLink.Arguments = '/d /c ""' + $stopCmd + '""'
+    $stopLink.TargetPath = $stopCmd
+    $stopLink.Arguments = ""
     $stopLink.WorkingDirectory = $PebrelNpuHome
     $stopLink.IconLocation = $exe + ",0"
     $stopLink.WindowStyle = 1
@@ -907,6 +905,14 @@ function Install-PebrelNpuShortcuts {
         if (-not (Test-Path $path)) {
             throw ("Failed to create NPU launcher component: " + $path)
         }
+    }
+    $startText = Get-Content -Raw -Path $startCmd
+    $stopText = Get-Content -Raw -Path $stopCmd
+    if ($startText -notmatch [regex]::Escape($stableScript) -or $startText -notmatch [regex]::Escape($exe)) {
+        throw "Start launcher validation failed: generated command does not contain the resolved helper/executable paths."
+    }
+    if ($stopText -notmatch [regex]::Escape($stableScript)) {
+        throw "Stop launcher validation failed: generated command does not contain the resolved helper path."
     }
 
     Write-Step ("Desktop shortcut verified: " + $startPath)
