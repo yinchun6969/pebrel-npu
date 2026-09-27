@@ -13,7 +13,7 @@ use crate::ai_providers::{AiProvider, ProviderKind};
 
 const SYSTEM_PROMPT: &str = "You are Pebrel's built-in terminal assistant. Be concise, practical, and technically precise. When the user provides terminal output or code, explain the cause and give actionable next steps. Do not claim to have executed commands you did not execute.";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChatRole {
     User,
@@ -68,7 +68,7 @@ fn openai_messages(messages: &[ChatMessage]) -> Vec<serde_json::Value> {
     payload.extend(messages.iter().map(|message| {
         serde_json::json!({
             "role": message.openai_role(),
-            "content": message.content,
+            "content": message.content.as_str(),
         })
     }));
     payload
@@ -80,7 +80,7 @@ fn anthropic_messages(messages: &[ChatMessage]) -> Vec<serde_json::Value> {
         .map(|message| {
             serde_json::json!({
                 "role": message.openai_role(),
-                "content": message.content,
+                "content": message.content.as_str(),
             })
         })
         .collect()
@@ -119,7 +119,7 @@ fn request_url(provider: &AiProvider) -> String {
 fn request_body(provider: &AiProvider, messages: &[ChatMessage]) -> serde_json::Value {
     match provider.kind {
         ProviderKind::Anthropic => serde_json::json!({
-            "model": provider.model,
+            "model": provider.model.as_str(),
             "system": SYSTEM_PROMPT,
             "temperature": 0.2,
             "max_tokens": 1200,
@@ -131,7 +131,7 @@ fn request_body(provider: &AiProvider, messages: &[ChatMessage]) -> serde_json::
             "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200},
         }),
         ProviderKind::OpenVinoNpu => serde_json::json!({
-            "model": provider.model,
+            "model": provider.model.as_str(),
             "temperature": 0.2,
             "max_tokens": 1200,
             "stream": false,
@@ -139,7 +139,7 @@ fn request_body(provider: &AiProvider, messages: &[ChatMessage]) -> serde_json::
             "messages": openai_messages(messages),
         }),
         _ => serde_json::json!({
-            "model": provider.model,
+            "model": provider.model.as_str(),
             "temperature": 0.2,
             "max_tokens": 1200,
             "stream": false,
