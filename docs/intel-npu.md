@@ -108,6 +108,14 @@ When this provider is selected, the Settings page also shows **Intel NPU runtime
 the UI thread. Pebrel only stops an OVMS process that has a managed PID; an externally
 started OVMS instance is shown as external/unmanaged and is not force-killed.
 
+Pebrel also exposes a native **Pebrel AI Chat** surface. Press **Ctrl+Shift+A** (or
+open the command palette and choose **Pebrel AI Chat…**) to talk directly to any enabled
+provider. The Intel NPU preset sends chat requests to the local OVMS endpoint; enabled custom
+OpenAI-compatible providers use their configured endpoint and OS-stored API key.
+
+Selecting terminal or document text and opening its context menu also exposes
+**Analyze with Pebrel AI...**, which opens the same native chat with the selection pre-filled.
+
 Pebrel's existing AI assistant can then use the selected provider for local terminal-error
 analysis and command suggestions.
 
@@ -168,6 +176,18 @@ OVMS，只显示状态，不会强制结束。
 ```
 
 会生成 **Start Pebrel NPU** 与 **Stop Pebrel NPU** 两个快捷方式。
+
+原生 AI 对话入口：
+
+```text
+Ctrl+Shift+A
+→ Pebrel AI Chat
+→ 选择 Intel NPU (OpenVINO) 或已启用的第三方供应商
+→ 输入问题并发送
+```
+
+在终端或文档中选中文字后右键，还可以选择 **用 Pebrel AI 分析...**，选中的内容会
+自动带入对话框。
 
 诊断命令：
 
