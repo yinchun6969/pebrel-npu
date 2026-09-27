@@ -262,7 +262,7 @@ pub fn start(model: &str, base_url: &str) -> Result<NpuRuntimeStatus, String> {
         let port = loopback_port(base_url)?;
         let paths = RuntimePaths::discover()?;
         match inspect_with_paths(model, port, &paths) {
-            NpuRuntimeStatus::Running { model_available: true, .. } as status => return Ok(status),
+            status @ NpuRuntimeStatus::Running { model_available: true, .. } => return Ok(status),
             NpuRuntimeStatus::Running { model_available: false, .. } => {
                 return Err(format!(
                     "OVMS is already running on port {port}, but model {model} is not AVAILABLE"
