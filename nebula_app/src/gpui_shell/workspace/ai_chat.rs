@@ -49,7 +49,6 @@ impl SelectItem for AiChatProviderItem {
                         .max_w(px(180.0))
                         .truncate()
                         .text_xs()
-                        .text_color(gpui::hsla(0.0, 0.0, 0.55, 1.0))
                         .child(self.model.clone()),
                 )
                 .into_any_element(),
@@ -168,7 +167,12 @@ impl NebulaWorkspace {
             .or_else(|| providers.first().map(|provider| provider.id.clone()));
         let provider_count = providers.len();
         let provider_select =
-            cx.new(|cx| SelectState::new(providers, selected, window, cx).searchable(provider_count > 5));
+            cx.new(|cx| SelectState::new(providers, None, window, cx).searchable(provider_count > 5));
+        if let Some(selected) = selected {
+            provider_select.update(cx, |select, cx| {
+                select.set_selected_value(&selected, window, cx);
+            });
+        }
         let input = cx.new(|cx| InputState::new(window, cx).multi_line(true).soft_wrap(true));
         if let Some(prefill) = prefill {
             let prompt = format!(
