@@ -790,7 +790,11 @@ function Install-PebrelNpuShortcuts {
     $shell = New-Object -ComObject WScript.Shell
     $powershell = Join-Path $PSHOME "powershell.exe"
 
-    $launchLink = $shell.CreateShortcut((Join-Path $desktop "Pebrel NPU.lnk"))
+    $legacyLaunch = Join-Path $desktop "Pebrel NPU.lnk"
+    Remove-Item $legacyLaunch -Force -ErrorAction SilentlyContinue
+
+    $startPath = Join-Path $desktop "Start Pebrel NPU.lnk"
+    $launchLink = $shell.CreateShortcut($startPath)
     $launchLink.TargetPath = $powershell
     $launchLink.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $stableScript + '" launch -PebrelExe "' + $exe + '"'
     $launchLink.WorkingDirectory = Split-Path $exe -Parent
@@ -798,17 +802,24 @@ function Install-PebrelNpuShortcuts {
     $launchLink.WindowStyle = 7
     $launchLink.Description = "Start Intel NPU runtime if needed, then open Pebrel"
     $launchLink.Save()
+    if (-not (Test-Path $startPath)) {
+        throw ("Failed to create desktop shortcut: " + $startPath)
+    }
 
-    $stopLink = $shell.CreateShortcut((Join-Path $desktop "Stop Pebrel NPU.lnk"))
+    $stopPath = Join-Path $desktop "Stop Pebrel NPU.lnk"
+    $stopLink = $shell.CreateShortcut($stopPath)
     $stopLink.TargetPath = $powershell
     $stopLink.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $stableScript + '" stop'
     $stopLink.WorkingDirectory = $PebrelNpuHome
     $stopLink.WindowStyle = 7
     $stopLink.Description = "Stop the Pebrel Intel NPU runtime"
     $stopLink.Save()
+    if (-not (Test-Path $stopPath)) {
+        throw ("Failed to create desktop shortcut: " + $stopPath)
+    }
 
-    Write-Step ("Desktop shortcut created: " + (Join-Path $desktop "Pebrel NPU.lnk"))
-    Write-Step ("Desktop shortcut created: " + (Join-Path $desktop "Stop Pebrel NPU.lnk"))
+    Write-Step ("Desktop shortcut verified: " + $startPath)
+    Write-Step ("Desktop shortcut verified: " + $stopPath)
 }
 
 function Show-Doctor {
