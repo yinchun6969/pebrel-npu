@@ -222,13 +222,14 @@ impl SettingsPane {
         cx.notify();
     }
 
-    fn render_npu_runtime_controls(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_npu_runtime_controls(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
         use crate::i18n::Message;
         use crate::npu_runtime::NpuRuntimeStatus;
 
         let language = crate::gpui_shell::config::ui_language(cx);
         let theme = cx.theme();
-        let status = self.npu_runtime_status.as_ref();
+        let status_owned = self.npu_runtime_status.clone();
+        let status = status_owned.as_ref();
         let (status_text, status_color) = match status {
             None => (
                 language.text(Message::SettingsNpuRuntimeStatusUnknown).to_owned(),
@@ -414,8 +415,11 @@ impl SettingsPane {
             let goals = provider.codex_goals;
             let remote = provider.codex_remote_compaction;
             let npu_runtime_controls =
-                (provider.kind == crate::ai_providers::ProviderKind::OpenVinoNpu)
-                    .then(|| self.render_npu_runtime_controls(cx));
+                if provider.kind == crate::ai_providers::ProviderKind::OpenVinoNpu {
+                    Some(self.render_npu_runtime_controls(cx))
+                } else {
+                    None
+                };
             editor = editor
                 .child(
                     self.row(
