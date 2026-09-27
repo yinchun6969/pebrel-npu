@@ -222,55 +222,57 @@ impl SettingsPane {
         cx.notify();
     }
 
-    fn render_npu_runtime_controls(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_npu_runtime_controls(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         use crate::i18n::Message;
         use crate::npu_runtime::NpuRuntimeStatus;
 
         let language = crate::gpui_shell::config::ui_language(cx);
-        let theme = cx.theme();
+        let muted_foreground = cx.theme().muted_foreground;
+        let danger = cx.theme().danger;
+        let success = cx.theme().success;
         let status_owned = self.npu_runtime_status.clone();
         let status = status_owned.as_ref();
         let (status_text, status_color) = match status {
             None => (
                 language.text(Message::SettingsNpuRuntimeStatusUnknown).to_owned(),
-                theme.muted_foreground,
+                muted_foreground,
             ),
             Some(NpuRuntimeStatus::Unsupported) => (
                 language.text(Message::SettingsNpuRuntimeStatusUnsupported).to_owned(),
-                theme.muted_foreground,
+                muted_foreground,
             ),
             Some(NpuRuntimeStatus::NotInstalled) => (
                 language.text(Message::SettingsNpuRuntimeStatusNotInstalled).to_owned(),
-                theme.danger,
+                danger,
             ),
             Some(NpuRuntimeStatus::NotConfigured) => (
                 language.text(Message::SettingsNpuRuntimeStatusNotConfigured).to_owned(),
-                theme.danger,
+                danger,
             ),
             Some(NpuRuntimeStatus::Stopped) => (
                 language.text(Message::SettingsNpuRuntimeStatusStopped).to_owned(),
-                theme.muted_foreground,
+                muted_foreground,
             ),
             Some(NpuRuntimeStatus::Running { managed: false, .. }) => (
                 language.text(Message::SettingsNpuRuntimeStatusRunningUnmanaged).to_owned(),
-                theme.success,
+                success,
             ),
             Some(NpuRuntimeStatus::Running { model_available: true, .. }) => (
                 language.text(Message::SettingsNpuRuntimeStatusRunning).to_owned(),
-                theme.success,
+                success,
             ),
             Some(NpuRuntimeStatus::Running { model_available: false, .. }) => (
                 language
                     .text(Message::SettingsNpuRuntimeStatusRunningModelUnavailable)
                     .to_owned(),
-                theme.danger,
+                danger,
             ),
             Some(NpuRuntimeStatus::Error(error)) => (
                 language.format(
                     Message::SettingsNpuRuntimeStatusError,
                     &[("error", error.as_str())],
                 ),
-                theme.danger,
+                danger,
             ),
         };
         let busy = self.npu_runtime_operation.is_some();
@@ -359,12 +361,15 @@ impl SettingsPane {
     // ---- 分区内容（归属对照旧壳各 section）----
     pub(super) fn section_providers(&mut self, cx: &mut Context<Self>) -> gpui::Div {
         let language = crate::gpui_shell::config::ui_language(cx);
-        let theme = cx.theme();
+        let list_active = cx.theme().list_active;
+        let muted_foreground = cx.theme().muted_foreground;
+        let danger = cx.theme().danger;
+        let success = cx.theme().success;
         let hover_bg = crate::gpui_shell::theme::settings_hover_bg(cx, false);
         let active_index = self.active_provider_index().unwrap_or(0);
         let active = self.provider_store.providers.get(active_index).cloned();
         let active_id = active.as_ref().map(|provider| provider.id.clone()).unwrap_or_default();
-        let provider_rows = self.provider_store.providers.iter().map(|provider| {
+        let provider_rows: Vec<_> = self.provider_store.providers.iter().map(|provider| {
             let id = provider.id.clone();
             let selected = provider.id == active_id;
             let name = provider.name.clone();
@@ -377,22 +382,22 @@ impl SettingsPane {
                 .gap_2()
                 .items_center()
                 .rounded_md()
-                .when(selected, |row| row.bg(theme.list_active))
+                .when(selected, |row| row.bg(list_active))
                 .hover(move |row| row.bg(hover_bg))
-                .child(Icon::new(IconName::Bot).xsmall().text_color(theme.muted_foreground))
+                .child(Icon::new(IconName::Bot).xsmall().text_color(muted_foreground))
                 .child(div().flex_1().min_w_0().truncate().child(name))
                 .child(
                     div()
                         .max_w(px(78.0))
                         .text_xs()
-                        .text_color(theme.muted_foreground)
+                        .text_color(muted_foreground)
                         .truncate()
                         .child(kind),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.select_provider(id.clone(), window, cx);
                 }))
-        });
+        }).collect();
 
         let mut editor = v_flex().flex_1().min_w_0().gap_3();
         if let Some(provider) = active {
@@ -485,7 +490,7 @@ impl SettingsPane {
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(theme.muted_foreground)
+                                    .text_color(muted_foreground)
                                     .child(key_status),
                             )
                             .child(
@@ -570,7 +575,7 @@ impl SettingsPane {
         } else {
             editor = editor.child(
                 div()
-                    .text_color(theme.muted_foreground)
+                    .text_color(muted_foreground)
                     .child(language.pick("没有供应商配置", "No provider configured")),
             );
         }
@@ -604,7 +609,7 @@ impl SettingsPane {
                 let message = status.text(language);
                 group.child(
                     div()
-                        .text_color(if error { theme.danger } else { theme.success })
+                        .text_color(if error { danger } else { success })
                         .child(message),
                 )
             })
