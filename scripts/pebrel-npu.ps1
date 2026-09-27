@@ -750,7 +750,17 @@ function Stop-Ovms {
         throw ("Failed to stop managed OVMS process tree PID " + $managedPid)
     }
     Remove-Item $PidPath -Force -ErrorAction SilentlyContinue
-    Write-Step "Stopped OVMS process tree PID $managedPid."
+
+    for ($i = 0; $i -lt 20; $i++) {
+        try {
+            $null = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/config" -TimeoutSec 1
+            Start-Sleep -Milliseconds 250
+        } catch {
+            Write-Step "Stopped OVMS process tree PID $managedPid; endpoint is offline."
+            return
+        }
+    }
+    throw "OVMS process tree was terminated, but the endpoint still responds on the configured port."
 }
 
 function Test-NpuChat {
@@ -822,38 +832,87 @@ function Install-PebrelNpuShortcuts {
     $exe = Resolve-PebrelExe
     $desktop = [Environment]::GetFolderPath("Desktop")
     $shell = New-Object -ComObject WScript.Shell
-    $powershell = Join-Path $PSHOME "powershell.exe"
+    $cmd = $env:ComSpec
+    if ([string]::IsNullOrWhiteSpace($cmd)) {
+        $cmd = Join-Path $env:SystemRoot "System32\cmd.exe"
+    }
 
-    $legacyLaunch = Join-Path $desktop "Pebrel NPU.lnk"
-    Remove-Item $legacyLaunch -Force -ErrorAction SilentlyContinue
+    # Remove every older variant before recreating the launchers so stale
+    # shortcuts cannot keep pointing at an obsolete helper copied earlier.
+    @(
+        (Join-Path $desktop "Pebrel NPU.lnk"),
+        (Join-Path $desktop "Start Pebrel NPU.lnk"),
+        (Join-Path $desktop "Stop Pebrel NPU.lnk")
+    ) | ForEach-Object {
+        Remove-Item $_ -Force -ErrorAction SilentlyContinue
+    }
+
+    $startCmd = Join-Path $PebrelNpuHome "Start Pebrel NPU.cmd"
+    $stopCmd = Join-Path $PebrelNpuHome "Stop Pebrel NPU.cmd"
+
+    $startLines = @(
+        "@echo off",
+        "setlocal",
+        'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $stableScript + '" launch -PebrelExe "' + $exe + '"',
+        'set "RC=%ERRORLEVEL%"',
+        'if not "%RC%"=="0" (',
+        '  echo.',
+        '  echo Pebrel NPU start failed. Press any key to close.',
+        '  pause >nul',
+        '  exit /b %RC%',
+        ')',
+        'exit /b 0'
+    )
+    Set-Content -Path $startCmd -Value $startLines -Encoding ascii
+
+    $stopLines = @(
+        "@echo off",
+        "setlocal",
+        'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $stableScript + '" stop',
+        'set "RC=%ERRORLEVEL%"',
+        'if not "%RC%"=="0" (',
+        '  echo.',
+        '  echo Pebrel NPU stop failed. Press any key to close.',
+        '  pause >nul',
+        '  exit /b %RC%',
+        ')',
+        'echo.',
+        'echo Pebrel NPU stopped.',
+        'timeout /t 2 /nobreak >nul',
+        'exit /b 0'
+    )
+    Set-Content -Path $stopCmd -Value $stopLines -Encoding ascii
 
     $startPath = Join-Path $desktop "Start Pebrel NPU.lnk"
     $launchLink = $shell.CreateShortcut($startPath)
-    $launchLink.TargetPath = $powershell
-    $launchLink.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $stableScript + '" launch -PebrelExe "' + $exe + '"'
+    $launchLink.TargetPath = $cmd
+    $launchLink.Arguments = '/d /c ""' + $startCmd + '""'
     $launchLink.WorkingDirectory = Split-Path $exe -Parent
     $launchLink.IconLocation = $exe + ",0"
-    $launchLink.WindowStyle = 7
+    $launchLink.WindowStyle = 1
     $launchLink.Description = "Start Intel NPU runtime if needed, then open Pebrel"
     $launchLink.Save()
-    if (-not (Test-Path $startPath)) {
-        throw ("Failed to create desktop shortcut: " + $startPath)
-    }
 
     $stopPath = Join-Path $desktop "Stop Pebrel NPU.lnk"
     $stopLink = $shell.CreateShortcut($stopPath)
-    $stopLink.TargetPath = $powershell
-    $stopLink.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $stableScript + '" stop'
+    $stopLink.TargetPath = $cmd
+    $stopLink.Arguments = '/d /c ""' + $stopCmd + '""'
     $stopLink.WorkingDirectory = $PebrelNpuHome
-    $stopLink.WindowStyle = 7
-    $stopLink.Description = "Stop the Pebrel Intel NPU runtime"
+    $stopLink.IconLocation = $exe + ",0"
+    $stopLink.WindowStyle = 1
+    $stopLink.Description = "Stop the managed Pebrel Intel NPU runtime"
     $stopLink.Save()
-    if (-not (Test-Path $stopPath)) {
-        throw ("Failed to create desktop shortcut: " + $stopPath)
+
+    foreach ($path in @($startCmd, $stopCmd, $startPath, $stopPath)) {
+        if (-not (Test-Path $path)) {
+            throw ("Failed to create NPU launcher component: " + $path)
+        }
     }
 
     Write-Step ("Desktop shortcut verified: " + $startPath)
     Write-Step ("Desktop shortcut verified: " + $stopPath)
+    Write-Step ("Launcher command verified: " + $startCmd)
+    Write-Step ("Launcher command verified: " + $stopCmd)
 }
 
 function Show-Doctor {
