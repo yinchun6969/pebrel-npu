@@ -592,15 +592,18 @@ impl SettingsPane {
                             .flex_shrink_0()
                             .h(px(420.0))
                             .gap_1()
-                            .overflow_y_scrollbar()
-                            .children(provider_rows)
                             .child(
                                 NebulaButton::new("provider-add")
-                                    .label(language.pick("+ 自定义供应商", "+ Custom provider"))
+                                    .label(language.pick(
+                                        "+ 第三方 OpenAI 兼容",
+                                        "+ Custom OpenAI-compatible",
+                                    ))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.add_provider(window, cx);
                                     })),
-                            ),
+                            )
+                            .children(provider_rows)
+                            .overflow_y_scrollbar(),
                     )
                     .child(editor),
             )
