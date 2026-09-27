@@ -79,6 +79,7 @@ pub(super) fn default_workspace_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-shift-w", CloseActiveTerminal, None),
         KeyBinding::new("ctrl-shift-b", ToggleSidebar, None),
         KeyBinding::new("ctrl-,", OpenSettings, None),
+        KeyBinding::new("ctrl-shift-a", OpenAiChat, None),
         KeyBinding::new("ctrl-shift-p", ToggleCommandPalette, None),
         KeyBinding::new("ctrl-k", ToggleShellPicker, None),
         KeyBinding::new("ctrl-shift-f", ToggleFileTree, None),
