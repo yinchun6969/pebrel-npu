@@ -158,6 +158,8 @@ pub struct SettingsPane {
     provider_status: Option<ProviderStatus>,
     provider_test_seq: u64,
     provider_test_running: bool,
+    provider_key_seq: u64,
+    provider_key_prompt_running: bool,
     provider_codex_confirm: Option<String>,
     npu_runtime_status: Option<crate::npu_runtime::NpuRuntimeStatus>,
     npu_runtime_operation: Option<NpuRuntimeOperation>,
