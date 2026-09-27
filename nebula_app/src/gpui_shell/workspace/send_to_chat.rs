@@ -182,13 +182,33 @@ impl NebulaWorkspace {
     ) {
         let language = workspace_ui_language();
         let has_targets = !self.send_to_chat_targets(cx).is_empty();
+        let has_native_ai =
+            crate::ai_providers::load().providers.iter().any(|provider| provider.enabled);
         let workspace = cx.entity().downgrade();
         let menu = PopupMenu::build(window, cx, move |mut menu, _window, _cx| {
+            let native_workspace = workspace.clone();
+            let native_selection = selection.clone();
             let send_workspace = workspace.clone();
             let send_selection = selection.clone();
             for item in copy_items {
                 menu = menu.item(item);
             }
+            menu = menu.item(
+                PopupMenuItem::new(language.pick("用 Pebrel AI 分析...", "Analyze with Pebrel AI..."))
+                    .icon(IconName::Star)
+                    .disabled(!has_native_ai)
+                    .on_click(move |_, window, cx| {
+                        if let Some(workspace) = native_workspace.upgrade() {
+                            workspace.update(cx, |workspace, cx| {
+                                workspace.open_native_ai_chat_dialog(
+                                    Some(native_selection.clone()),
+                                    window,
+                                    cx,
+                                );
+                            });
+                        }
+                    }),
+            );
             menu.external_link_icon(false).item(
                 PopupMenuItem::new(language.pick("发送到聊天...", "Send to Chat..."))
                     // 当前图标包没有 speech-bubble；对 Agent 使用中性星形而非
