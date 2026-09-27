@@ -1072,7 +1072,7 @@ impl CommandPalette {
     /// 文案。
     fn parked(&self, action: &PaletteAction) -> bool {
         match action {
-            PaletteAction::OpenAiSessionPicker => true,
+            PaletteAction::OpenAiSessionPicker | PaletteAction::OpenAiChat => true,
             PaletteAction::CopyCwd | PaletteAction::RevealCwd => self.context.cwd.is_none(),
             _ => false,
         }
