@@ -614,6 +614,8 @@ impl SettingsPane {
             provider_status: None,
             provider_test_seq: 0,
             provider_test_running: false,
+            provider_key_seq: 0,
+            provider_key_prompt_running: false,
             provider_codex_confirm: None,
             npu_runtime_status: None,
             npu_runtime_operation: None,
