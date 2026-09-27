@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, Focusable as _, IntoElement,
-    ParentElement as _, SharedString, Styled as _, Window, div, px, relative,
+    AnyElement, App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _,
+    IntoElement, ParentElement as _, SharedString, Styled as _, Window, div, px, relative,
 };
 use gpui_component::select::SelectItem;
 
