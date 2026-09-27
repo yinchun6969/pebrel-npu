@@ -92,7 +92,7 @@ fn google_contents(messages: &[ChatMessage]) -> Vec<serde_json::Value> {
         .map(|message| {
             serde_json::json!({
                 "role": message.google_role(),
-                "parts": [{"text": message.content}],
+                "parts": [{"text": message.content.as_str()}],
             })
         })
         .collect()
