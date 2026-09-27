@@ -189,7 +189,8 @@ function Invoke-Ovms {
         New-Item -ItemType Directory -Force -Path $PebrelNpuHome | Out-Null
         $full = $command + ' >> "' + $LogPath + '" 2>&1'
         $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/d","/s","/c",$full) -WindowStyle Hidden -PassThru
-        Set-Content -Path $PidPath -Value $proc.Id -Encoding ascii
+        $creation = $proc.StartTime.ToFileTimeUtc()
+        Set-Content -Path $PidPath -Value ($proc.Id.ToString() + "|" + $creation.ToString()) -Encoding ascii
         return $proc
     }
 
@@ -678,17 +679,45 @@ function Prepare-Model {
     )
 }
 
+function Get-ManagedOvmsProcess {
+    if (-not (Test-Path $PidPath)) { return $null }
+    $raw = [string](Get-Content $PidPath -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+
+    $parts = $raw.Trim() -split '\|', 2
+    $managedPid = 0
+    if (-not [int]::TryParse($parts[0], [ref]$managedPid)) { return $null }
+    $proc = Get-Process -Id $managedPid -ErrorAction SilentlyContinue
+    if (-not $proc) { return $null }
+
+    if ($parts.Count -eq 2) {
+        [int64]$expectedCreation = 0
+        if (-not [int64]::TryParse($parts[1], [ref]$expectedCreation)) { return $null }
+        if ($proc.StartTime.ToFileTimeUtc() -ne $expectedCreation) { return $null }
+        return $proc
+    }
+
+    # Legacy one-field PID records are accepted only when WMI confirms this
+    # cmd.exe still owns an OVMS command line. This avoids killing a reused PID.
+    $row = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $managedPid) -ErrorAction SilentlyContinue
+    if ($row -and ([string]$row.CommandLine) -match '(?i)ovms(\.exe)?') {
+        return $proc
+    }
+    return $null
+}
+
 function Start-Ovms {
     if (-not (Test-Path $ConfigPath)) {
         throw "Model config not found. Run: .\scripts\pebrel-npu.ps1 model"
     }
 
     if (Test-Path $PidPath) {
-        $oldPid = (Get-Content $PidPath -ErrorAction SilentlyContinue | Select-Object -First 1)
-        if ($oldPid -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {
-            Write-Step "OVMS is already running (PID $oldPid)."
+        $managed = Get-ManagedOvmsProcess
+        if ($managed) {
+            Write-Step ("OVMS is already running (managed PID " + $managed.Id + ").")
             return
         }
+        Remove-Item $PidPath -Force -ErrorAction SilentlyContinue
     }
 
     Remove-Item $LogPath -Force -ErrorAction SilentlyContinue
@@ -711,15 +740,17 @@ function Stop-Ovms {
         Write-Step "No managed OVMS PID file found."
         return
     }
-    $id = (Get-Content $PidPath | Select-Object -First 1)
-    if ($id -and (Get-Process -Id $id -ErrorAction SilentlyContinue)) {
-        & taskkill.exe /PID $id /T /F *> $null
-        if ($LASTEXITCODE -ne 0) {
-            throw ("Failed to stop managed OVMS process tree PID " + $id)
-        }
-        Write-Step "Stopped OVMS process tree PID $id."
+    $proc = Get-ManagedOvmsProcess
+    if (-not $proc) {
+        throw "The OVMS PID record is stale or does not identify the managed OVMS process. Refusing to kill an unrelated process."
+    }
+    $managedPid = $proc.Id
+    & taskkill.exe /PID $managedPid /T /F *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw ("Failed to stop managed OVMS process tree PID " + $managedPid)
     }
     Remove-Item $PidPath -Force -ErrorAction SilentlyContinue
+    Write-Step "Stopped OVMS process tree PID $managedPid."
 }
 
 function Test-NpuChat {
