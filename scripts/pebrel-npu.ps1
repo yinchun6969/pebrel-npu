@@ -713,8 +713,11 @@ function Stop-Ovms {
     }
     $id = (Get-Content $PidPath | Select-Object -First 1)
     if ($id -and (Get-Process -Id $id -ErrorAction SilentlyContinue)) {
-        Stop-Process -Id $id -Force
-        Write-Step "Stopped OVMS PID $id."
+        & taskkill.exe /PID $id /T /F *> $null
+        if ($LASTEXITCODE -ne 0) {
+            throw ("Failed to stop managed OVMS process tree PID " + $id)
+        }
+        Write-Step "Stopped OVMS process tree PID $id."
     }
     Remove-Item $PidPath -Force -ErrorAction SilentlyContinue
 }
