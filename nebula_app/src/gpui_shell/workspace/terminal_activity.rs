@@ -123,7 +123,7 @@ impl NebulaWorkspace {
                         view.clone(),
                         pane_id,
                         *position,
-                        text.clone(),
+                        text.clone().unwrap_or_default(),
                         window,
                         cx,
                     );
