@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, Focusable as _, IntoElement,
     ParentElement as _, SharedString, Styled as _, Window, div, px, relative,
@@ -160,19 +161,20 @@ impl NebulaWorkspace {
             return;
         }
 
-        let selected = providers
+        let selected_index = providers
             .iter()
-            .find(|provider| provider.id == active_id)
-            .map(|provider| provider.id.clone())
-            .or_else(|| providers.first().map(|provider| provider.id.clone()));
+            .position(|provider| provider.id == active_id)
+            .unwrap_or(0);
         let provider_count = providers.len();
-        let provider_select =
-            cx.new(|cx| SelectState::new(providers, None, window, cx).searchable(provider_count > 5));
-        if let Some(selected) = selected {
-            provider_select.update(cx, |select, cx| {
-                select.set_selected_value(&selected, window, cx);
-            });
-        }
+        let provider_select = cx.new(|cx| {
+            SelectState::new(
+                providers,
+                Some(IndexPath::default().row(selected_index)),
+                window,
+                cx,
+            )
+            .searchable(provider_count > 5)
+        });
         let input = cx.new(|cx| InputState::new(window, cx).multi_line(true).soft_wrap(true));
         if let Some(prefill) = prefill {
             let prompt = format!(
