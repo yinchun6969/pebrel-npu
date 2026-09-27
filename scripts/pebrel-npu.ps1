@@ -11,7 +11,7 @@ Examples:
 [CmdletBinding()]
 param(
     [Parameter(Position=0)]
-    [ValidateSet("doctor","devices","install","model","repair-tokenizer","repair-file","finalize-model","start","test","stop","setup")]
+    [ValidateSet("doctor","devices","install","model","repair-tokenizer","repair-file","finalize-model","start","test","stop","launch","shortcut","setup")]
     [string]$Action = "doctor",
 
     [string]$Model = "OpenVINO/Qwen3-8B-int4-cw-ov",
@@ -22,6 +22,7 @@ param(
     [int]$LfsResumeAttempts = 20,
     [int]$LfsResumeIntervalSeconds = 15,
     [string]$RepairFile = "",
+    [string]$PebrelExe = "",
     [string]$PebrelNpuHome = (Join-Path $env:LOCALAPPDATA "PebrelNPU")
 )
 
@@ -743,6 +744,73 @@ function Test-NpuChat {
     Write-Host "NPU response: $reply"
 }
 
+function Resolve-PebrelExe {
+    if (-not [string]::IsNullOrWhiteSpace($PebrelExe)) {
+        if (Test-Path $PebrelExe) { return (Resolve-Path $PebrelExe).Path }
+        throw ("Pebrel executable not found: " + $PebrelExe)
+    }
+
+    $candidates = @(
+        (Join-Path $PSScriptRoot "..\target\release\pebrel.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs\Pebrel\pebrel.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) { return (Resolve-Path $candidate).Path }
+    }
+
+    $cmd = Get-Command pebrel.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    throw "pebrel.exe was not found. Build Pebrel first or pass -PebrelExe <path>."
+}
+
+function Launch-PebrelWithNpu {
+    try {
+        Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/config" -TimeoutSec 2 | Out-Null
+        Write-Step "OVMS is already ready."
+    } catch {
+        Write-Step "OVMS is not ready; starting the Intel NPU runtime..."
+        Start-Ovms
+    }
+
+    $exe = Resolve-PebrelExe
+    Write-Step ("Launching Pebrel: " + $exe)
+    Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe -Parent) | Out-Null
+}
+
+function Install-PebrelNpuShortcuts {
+    New-Item -ItemType Directory -Force -Path $PebrelNpuHome | Out-Null
+    $stableScript = Join-Path $PebrelNpuHome "pebrel-npu.ps1"
+    if ([string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        throw "Cannot install shortcuts because the helper script path is unavailable."
+    }
+    Copy-Item -Path $PSCommandPath -Destination $stableScript -Force
+
+    $exe = Resolve-PebrelExe
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    $shell = New-Object -ComObject WScript.Shell
+    $powershell = Join-Path $PSHOME "powershell.exe"
+
+    $launchLink = $shell.CreateShortcut((Join-Path $desktop "Pebrel NPU.lnk"))
+    $launchLink.TargetPath = $powershell
+    $launchLink.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $stableScript + '" launch -PebrelExe "' + $exe + '"'
+    $launchLink.WorkingDirectory = Split-Path $exe -Parent
+    $launchLink.IconLocation = $exe + ",0"
+    $launchLink.WindowStyle = 7
+    $launchLink.Description = "Start Intel NPU runtime if needed, then open Pebrel"
+    $launchLink.Save()
+
+    $stopLink = $shell.CreateShortcut((Join-Path $desktop "Stop Pebrel NPU.lnk"))
+    $stopLink.TargetPath = $powershell
+    $stopLink.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $stableScript + '" stop'
+    $stopLink.WorkingDirectory = $PebrelNpuHome
+    $stopLink.WindowStyle = 7
+    $stopLink.Description = "Stop the Pebrel Intel NPU runtime"
+    $stopLink.Save()
+
+    Write-Step ("Desktop shortcut created: " + (Join-Path $desktop "Pebrel NPU.lnk"))
+    Write-Step ("Desktop shortcut created: " + (Join-Path $desktop "Stop Pebrel NPU.lnk"))
+}
+
 function Show-Doctor {
     Write-Host ""
     Write-Host "Pebrel NPU doctor" -ForegroundColor White
@@ -804,6 +872,8 @@ switch ($Action) {
     "start"   { Start-Ovms }
     "test"    { Test-NpuChat }
     "stop"    { Stop-Ovms }
+    "launch"  { Launch-PebrelWithNpu }
+    "shortcut" { Install-PebrelNpuShortcuts }
     "setup"   {
         Install-Ovms
         Prepare-Model
