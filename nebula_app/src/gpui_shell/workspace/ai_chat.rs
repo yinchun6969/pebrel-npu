@@ -195,11 +195,10 @@ impl NebulaWorkspace {
         let dialog_input = input.clone();
         let dialog_state = state.clone();
         window.open_dialog(cx, move |dialog, window, cx| {
-            let snapshot = dialog_state.read(cx);
-            let messages = snapshot.messages.clone();
-            let loading = snapshot.loading;
-            let error = snapshot.error.clone();
-            drop(snapshot);
+            let (messages, loading, error) = {
+                let snapshot = dialog_state.read(cx);
+                (snapshot.messages.clone(), snapshot.loading, snapshot.error.clone())
+            };
 
             let history = if messages.is_empty() {
                 v_flex()
