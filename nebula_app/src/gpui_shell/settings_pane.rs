@@ -78,7 +78,8 @@ use navigation::*;
 use shell_picker::*;
 pub(super) use status::SshStatus;
 use status::{
-    AboutUpdateState, BackupCompletion, BackupStatus, ProviderStatus, TerminalImportError,
+    AboutUpdateState, BackupCompletion, BackupStatus, NpuRuntimeOperation, ProviderStatus,
+    TerminalImportError,
 };
 
 /// 宿主（workspace）监听：设置已写盘 / 终端目录已变 / 请求打开 SSH 会话。
@@ -157,7 +158,12 @@ pub struct SettingsPane {
     provider_status: Option<ProviderStatus>,
     provider_test_seq: u64,
     provider_test_running: bool,
+    provider_key_seq: u64,
+    provider_key_prompt_running: bool,
     provider_codex_confirm: Option<String>,
+    npu_runtime_status: Option<crate::npu_runtime::NpuRuntimeStatus>,
+    npu_runtime_operation: Option<NpuRuntimeOperation>,
+    npu_runtime_seq: u64,
     /// SSH 主机列表（共享三键 + merge 权威）；操作后整体重载防漂移。
     /// SSH 区的行为实现拆在 `ssh_settings.rs`（同类型第二个 impl 块）。
     pub(super) ssh_library: super::ssh_settings::library::HostLibraryState,

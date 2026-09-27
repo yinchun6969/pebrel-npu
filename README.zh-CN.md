@@ -115,6 +115,21 @@ Pebrel（原名 Nebula）把本地 Shell、远程主机、文件和 AI 命令行
   <img src="docs/screenshots/themes.png" alt="应用主题" width="1040" />
 </p>
 
+## Intel NPU 本地 AI（实验）
+
+此 fork 新增 **Intel NPU (OpenVINO)** 本地 AI 供应商，首个目标平台是 Windows 11 + Intel Core Ultra / Intel AI Boost。
+
+一键准备本地 NPU 运行环境：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\pebrel-npu.ps1 setup
+```
+
+然后进入 **设置 → AI 供应商 → Intel NPU (OpenVINO)**。默认连接 `http://127.0.0.1:8000/v3`，不需要 API Key。
+
+详细说明见 [Intel NPU 文档](docs/intel-npu.md)。
+
 ## 下载
 
 从 **[最新发布](https://github.com/Kuddev/pebrel/releases/latest)** 选择对应安装包。

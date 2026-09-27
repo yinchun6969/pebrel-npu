@@ -1,3 +1,10 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum NpuRuntimeOperation {
+    Refresh,
+    Start,
+    Stop,
+}
+
 use crate::gpui_shell::ssh_settings::SshValidationError;
 
 #[derive(Clone, Debug, Default)]

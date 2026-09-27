@@ -739,8 +739,10 @@ impl TerminalView {
         true
     }
 
-    /// 右键行为：有选区直接复制，无选区直接粘贴。
-    /// Ctrl+右键保留选区菜单，供显式调用 Send to Chat。
+    /// 标准终端右键：非应用鼠标模式下始终打开 workspace 菜单。
+    /// 有选区时菜单提供复制 / Pebrel AI 分析 / Send to Chat；无选区时提供
+    /// 粘贴与工作目录。应用开启 mouse reporting 时仍把普通右键交给应用，
+    /// Ctrl+右键作为显式逃生口打开 Pebrel 菜单。
     pub(super) fn on_right_down(
         &mut self,
         event: &MouseDownEvent,
@@ -771,20 +773,11 @@ impl TerminalView {
             .as_ref()
             .and_then(|session| session.term.lock().selection_to_string())
             .filter(|text| !text.is_empty());
-        if let Some(text) = selected_text {
-            if event.modifiers.control {
-                cx.emit(TerminalViewEvent::SelectionContextMenuRequested {
-                    position: event.position,
-                    text,
-                });
-            } else {
-                self.copy_selection(true, window, cx);
-            }
-            cx.stop_propagation();
-        } else {
-            self.paste(window, cx);
-            cx.stop_propagation();
-        }
+        cx.emit(TerminalViewEvent::SelectionContextMenuRequested {
+            position: event.position,
+            text: selected_text,
+        });
+        cx.stop_propagation();
     }
 
     pub(super) fn on_right_up(

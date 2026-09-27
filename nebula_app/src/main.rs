@@ -40,6 +40,8 @@ mod ai_agents;
 mod ai_assistant;
 mod ai_hook;
 mod ai_providers;
+mod npu_runtime;
+mod native_ai_chat;
 mod ai_sessions;
 mod app_icon;
 mod assistant_answer;

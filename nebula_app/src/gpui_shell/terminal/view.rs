@@ -179,11 +179,12 @@ pub enum TerminalViewEvent {
     /// 由它负责驻留提示、后台 Tab 标记和系统通知；raw context 不进入文案。
     AiAttention(crate::ai_hook::AttentionContext),
     Notification(crate::notify::Notification),
-    /// 非应用鼠标模式下右键命中真实终端选区。菜单由 workspace 根持有，
-    /// 避免每个 pane 都渲染一份带叠加阴影的 PopupMenu。
+    /// 非应用鼠标模式下的终端右键菜单。选区存在时携带文本；无选区时
+    /// text=None，workspace 仍显示粘贴/工作目录等标准菜单项。
+    /// 菜单由 workspace 根持有，避免每个 pane 都渲染一份 PopupMenu。
     SelectionContextMenuRequested {
         position: Point<Pixels>,
-        text: String,
+        text: Option<String>,
     },
     /// 程序上报的任务进度（OSC 9;4）变了。宿主把 pane 级状态投到 tab badge，
     /// 并且只把当前聚焦 pane 投到窗口级任务栏。

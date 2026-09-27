@@ -129,20 +129,31 @@ impl NebulaWorkspace {
     ) {
         let language = workspace_ui_language();
         let copy_cwd = super::tab_menu::copy_working_directory_item(&source, cx);
-        let source = source.downgrade();
-        let copy_item = PopupMenuItem::new(language.pick("复制选区", "Copy Selection"))
-            .icon(IconName::Copy)
-            .on_click(move |_, window, cx| {
-                if let Some(source) = source.upgrade() {
-                    source.update(cx, |view, cx| {
-                        view.copy_selection(true, window, cx);
-                    });
-                }
-            });
+        let has_selection = !selection.is_empty();
+        let weak_source = source.downgrade();
+        let primary_item = if has_selection {
+            let source = weak_source.clone();
+            PopupMenuItem::new(language.pick("复制选区", "Copy Selection"))
+                .icon(IconName::Copy)
+                .on_click(move |_, window, cx| {
+                    if let Some(source) = source.upgrade() {
+                        source.update(cx, |view, cx| {
+                            view.copy_selection(true, window, cx);
+                        });
+                    }
+                })
+        } else {
+            PopupMenuItem::new(language.pick("粘贴", "Paste"))
+                .on_click(move |_, window, cx| {
+                    if let Some(source) = weak_source.upgrade() {
+                        source.update(cx, |view, cx| view.paste(window, cx));
+                    }
+                })
+        };
         self.open_selection_context_menu(
             position,
             selection.into(),
-            vec![copy_item, copy_cwd],
+            vec![primary_item, copy_cwd],
             window,
             cx,
         );
@@ -181,20 +192,41 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) {
         let language = workspace_ui_language();
+        let has_selection = !selection.is_empty();
         let has_targets = !self.send_to_chat_targets(cx).is_empty();
+        let has_native_ai =
+            crate::ai_providers::load().providers.iter().any(|provider| provider.enabled);
         let workspace = cx.entity().downgrade();
         let menu = PopupMenu::build(window, cx, move |mut menu, _window, _cx| {
+            let native_workspace = workspace.clone();
+            let native_selection = selection.clone();
             let send_workspace = workspace.clone();
             let send_selection = selection.clone();
             for item in copy_items {
                 menu = menu.item(item);
             }
+            menu = menu.item(
+                PopupMenuItem::new(language.pick("用 Pebrel AI 分析...", "Analyze with Pebrel AI..."))
+                    .icon(IconName::Star)
+                    .disabled(!has_native_ai || !has_selection)
+                    .on_click(move |_, window, cx| {
+                        if let Some(workspace) = native_workspace.upgrade() {
+                            workspace.update(cx, |workspace, cx| {
+                                workspace.open_native_ai_chat_dialog(
+                                    Some(native_selection.clone()),
+                                    window,
+                                    cx,
+                                );
+                            });
+                        }
+                    }),
+            );
             menu.external_link_icon(false).item(
                 PopupMenuItem::new(language.pick("发送到聊天...", "Send to Chat..."))
                     // 当前图标包没有 speech-bubble；对 Agent 使用中性星形而非
                     // CLI 品牌图，与 Quick Jump 的会话行保持同一语义。
                     .icon(IconName::Star)
-                    .disabled(!has_targets)
+                    .disabled(!has_targets || !has_selection)
                     .on_click(move |_, window, cx| {
                         if let Some(workspace) = send_workspace.upgrade() {
                             workspace.update(cx, |workspace, cx| {

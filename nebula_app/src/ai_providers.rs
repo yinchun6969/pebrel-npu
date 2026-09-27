@@ -16,6 +16,7 @@ use crate::event::{Event, EventType};
 use crate::provider_test::ProviderTestOutcome;
 
 const STORE_FILE: &str = "pebrel_providers.json";
+const NPU_CUSTOM_DEFAULTS_MARKER: &str = "provider_defaults_npu_custom_v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -24,6 +25,7 @@ pub enum ProviderKind {
     Anthropic,
     Google,
     Ollama,
+    OpenVinoNpu,
     OpenRouter,
     Qwen,
     DeepSeek,
@@ -36,11 +38,12 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const PRESETS: [Self; 13] = [
+    pub const PRESETS: [Self; 14] = [
         Self::OpenAi,
         Self::Anthropic,
         Self::Google,
         Self::Ollama,
+        Self::OpenVinoNpu,
         Self::OpenRouter,
         Self::Qwen,
         Self::DeepSeek,
@@ -58,6 +61,7 @@ impl ProviderKind {
             Self::Anthropic => "Anthropic",
             Self::Google => "Google",
             Self::Ollama => "Ollama",
+            Self::OpenVinoNpu => "Intel NPU (OpenVINO)",
             Self::OpenRouter => "OpenRouter",
             Self::Qwen => "Qwen",
             Self::DeepSeek => "DeepSeek",
@@ -76,6 +80,7 @@ impl ProviderKind {
             Self::Anthropic => "https://api.anthropic.com/v1",
             Self::Google => "https://generativelanguage.googleapis.com/v1beta",
             Self::Ollama => "http://localhost:11434/v1",
+            Self::OpenVinoNpu => "http://127.0.0.1:8000/v3",
             Self::OpenRouter => "https://openrouter.ai/api/v1",
             Self::Qwen => "https://dashscope.aliyuncs.com/compatible-mode/v1",
             Self::DeepSeek => "https://api.deepseek.com/v1",
@@ -94,6 +99,7 @@ impl ProviderKind {
             Self::Anthropic => "claude-sonnet-4-5",
             Self::Google => "gemini-2.5-flash",
             Self::Ollama => "qwen3",
+            Self::OpenVinoNpu => "OpenVINO/Qwen3-8B-int4-cw-ov",
             Self::OpenRouter => "openai/gpt-5.4-mini",
             Self::Qwen => "qwen3.7-plus",
             Self::DeepSeek => "deepseek-chat",
@@ -106,8 +112,12 @@ impl ProviderKind {
         }
     }
 
+    pub fn default_enabled(self) -> bool {
+        matches!(self, Self::OpenVinoNpu | Self::Custom)
+    }
+
     pub fn requires_api_key(self) -> bool {
-        !matches!(self, Self::Ollama)
+        !matches!(self, Self::Ollama | Self::OpenVinoNpu)
     }
 
     pub fn uses_openai_protocol(self) -> bool {
@@ -153,7 +163,7 @@ impl AiProvider {
             kind,
             base_url: kind.default_base_url().to_owned(),
             model: kind.default_model().to_owned(),
-            enabled: true,
+            enabled: kind.default_enabled(),
             api_key_set: false,
             api_key_hint: String::new(),
             full_url: false,
@@ -237,6 +247,7 @@ pub fn load() -> ProviderStore {
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
     normalize(&mut store);
+    migrate_npu_custom_defaults_once(&mut store);
     store
 }
 
@@ -247,8 +258,39 @@ pub fn load() -> ProviderStore {
 fn normalize(store: &mut ProviderStore) {
     let mut existing = std::mem::take(&mut store.providers);
     let mut ordered = Vec::with_capacity(ProviderKind::PRESETS.len().max(existing.len()));
+
+    // Keep the two local/user-configurable choices visible at the top of Settings.
+    if let Some(index) =
+        existing.iter().position(|provider| provider.kind == ProviderKind::OpenVinoNpu)
+    {
+        ordered.push(existing.remove(index));
+    } else {
+        ordered.push(AiProvider::preset(
+            ProviderKind::OpenVinoNpu,
+            preset_id(ProviderKind::OpenVinoNpu),
+        ));
+    }
+
+    let mut customs = Vec::new();
+    let mut remainder = Vec::new();
+    for provider in existing {
+        if provider.kind == ProviderKind::Custom {
+            customs.push(provider);
+        } else {
+            remainder.push(provider);
+        }
+    }
+    if customs.is_empty() {
+        customs.push(AiProvider::preset(
+            ProviderKind::Custom,
+            preset_id(ProviderKind::Custom),
+        ));
+    }
+    ordered.extend(customs);
+    existing = remainder;
+
     for kind in ProviderKind::PRESETS {
-        if kind == ProviderKind::Custom {
+        if matches!(kind, ProviderKind::OpenVinoNpu | ProviderKind::Custom) {
             continue;
         }
         if let Some(index) = existing.iter().position(|provider| provider.kind == kind) {
@@ -257,15 +299,29 @@ fn normalize(store: &mut ProviderStore) {
             ordered.push(AiProvider::preset(kind, preset_id(kind)));
         }
     }
-    let had_custom = existing.iter().any(|provider| provider.kind == ProviderKind::Custom);
-    ordered.extend(existing.into_iter().filter(|provider| provider.kind == ProviderKind::Custom));
-    if !had_custom {
-        ordered.push(AiProvider::preset(ProviderKind::Custom, preset_id(ProviderKind::Custom)));
-    }
+
     store.providers = ordered;
     if !store.providers.iter().any(|provider| provider.id == store.active_id) {
-        store.active_id =
-            store.providers.first().map(|provider| provider.id.clone()).unwrap_or_default();
+        store.active_id = preset_id(ProviderKind::OpenVinoNpu);
+    }
+}
+
+fn migrate_npu_custom_defaults_once(store: &mut ProviderStore) {
+    let marker = crate::platform::dirs::data_dir().join(NPU_CUSTOM_DEFAULTS_MARKER);
+    if marker.is_file() {
+        return;
+    }
+
+    for provider in &mut store.providers {
+        provider.enabled = provider.kind.default_enabled();
+    }
+    store.active_id = preset_id(ProviderKind::OpenVinoNpu);
+
+    if save(store).is_ok() {
+        if let Some(parent) = marker.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(marker, b"1");
     }
 }
 
@@ -414,6 +470,13 @@ fn test_url(provider: &AiProvider) -> Result<String, ProviderTestOutcome> {
             let resource = base.strip_suffix("/openai/deployments").unwrap_or(base);
             format!("{resource}/openai/models?api-version=2024-10-21")
         },
+        ProviderKind::OpenVinoNpu => {
+            let root = base
+                .strip_suffix("/v3")
+                .or_else(|| base.strip_suffix("/v1"))
+                .unwrap_or(base);
+            format!("{root}/v1/config")
+        },
         _ => format!("{base}/models"),
     })
 }
@@ -529,6 +592,10 @@ mod tests {
                 assert!(!provider.base_url.is_empty());
             }
             assert!(!provider.api_key_set);
+            assert_eq!(
+                provider.enabled,
+                matches!(kind, ProviderKind::OpenVinoNpu | ProviderKind::Custom)
+            );
         }
     }
 
@@ -592,5 +659,7 @@ mod tests {
         assert_eq!(test_url(&openai).unwrap(), "https://api.openai.com/v1/models");
         let azure = AiProvider::preset(ProviderKind::AzureOpenAi, "azure");
         assert!(test_url(&azure).unwrap().contains("/openai/models?api-version="));
+        let npu = AiProvider::preset(ProviderKind::OpenVinoNpu, "npu");
+        assert_eq!(test_url(&npu).unwrap(), "http://127.0.0.1:8000/v1/config");
     }
 }

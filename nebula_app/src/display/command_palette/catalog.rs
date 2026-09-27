@@ -121,6 +121,12 @@ pub(super) const ITEMS: &[PaletteItem] = &[
         action: PaletteAction::ToggleGitPanel,
     },
     PaletteItem {
+        label: "Pebrel AI Chat…",
+        hint: "Ctrl+Shift+A",
+        search: "Pebrel AI Chat 对话 助手 NPU OpenAI compatible liaotian duihua zhushou",
+        action: PaletteAction::OpenAiChat,
+    },
+    PaletteItem {
         label: "打开设置",
         hint: "",
         search: "打开设置 open settings preferences dakai shezhi",

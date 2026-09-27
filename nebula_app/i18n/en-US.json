@@ -185,6 +185,25 @@
       "needs_repair": "Hook installed · needs repair",
       "initialize": "Run this agent once to create its configuration, then refresh.",
       "config_path": "Configuration: {path}"
+    },
+    "npu_runtime": {
+      "title": "Intel NPU runtime",
+      "description": "Manage the local OpenVINO Model Server used by this provider. Pebrel only starts or stops the loopback service it owns.",
+      "status_unknown": "Status not checked",
+      "status_unsupported": "Runtime management is available on Windows only",
+      "status_not_installed": "OVMS runtime not installed",
+      "status_not_configured": "Model configuration is missing",
+      "status_stopped": "Stopped",
+      "status_running": "Running · model available",
+      "status_running_model_unavailable": "Running · model is not available",
+      "status_running_unmanaged": "Running externally · Pebrel will not stop it",
+      "status_error": "Runtime error: {error}",
+      "action_refresh": "Refresh",
+      "action_refreshing": "Refreshing…",
+      "action_start": "Start NPU",
+      "action_starting": "Starting…",
+      "action_stop": "Stop NPU",
+      "action_stopping": "Stopping…"
     }
   },
   "provider": {

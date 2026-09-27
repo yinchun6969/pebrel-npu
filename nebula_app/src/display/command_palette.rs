@@ -206,6 +206,8 @@ pub enum PaletteAction {
     OpenDirectoryPicker,
     /// 打开「恢复 AI 会话」列表（claude / codex 的本地历史会话）。
     OpenAiSessionPicker,
+    /// Open Pebrel native provider-backed AI chat.
+    OpenAiChat,
     /// 把这条 resume 命令行敲进当前聚焦的终端执行。
     ResumeAiSession(String),
     CloseTab,
@@ -1070,7 +1072,7 @@ impl CommandPalette {
     /// 文案。
     fn parked(&self, action: &PaletteAction) -> bool {
         match action {
-            PaletteAction::OpenAiSessionPicker => true,
+            PaletteAction::OpenAiSessionPicker | PaletteAction::OpenAiChat => true,
             PaletteAction::CopyCwd | PaletteAction::RevealCwd => self.context.cwd.is_none(),
             _ => false,
         }
@@ -1292,6 +1294,7 @@ fn localized_item_label(item: &PaletteItem, language: super::UiLanguage) -> &'st
         TogglePanelResize => "Drag to resize panels",
         OpenDirectoryPicker => "New terminal in a frequent directory...",
         OpenAiSessionPicker => "Open quickly...",
+        OpenAiChat => "Pebrel AI Chat...",
         CloseTab => "Close tab",
         NextTab => "Next tab",
         PrevTab => "Previous tab",
