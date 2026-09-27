@@ -206,6 +206,8 @@ pub enum PaletteAction {
     OpenDirectoryPicker,
     /// 打开「恢复 AI 会话」列表（claude / codex 的本地历史会话）。
     OpenAiSessionPicker,
+    /// Open Pebrel native provider-backed AI chat.
+    OpenAiChat,
     /// 把这条 resume 命令行敲进当前聚焦的终端执行。
     ResumeAiSession(String),
     CloseTab,
