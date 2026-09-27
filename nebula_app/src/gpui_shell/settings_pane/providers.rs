@@ -25,12 +25,23 @@ impl SettingsPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.provider_store.providers.iter().any(|provider| provider.id == id) {
+        let kind = self
+            .provider_store
+            .providers
+            .iter()
+            .find(|provider| provider.id == id)
+            .map(|provider| provider.kind);
+        if let Some(kind) = kind {
             self.provider_store.active_id = id;
             let _ = crate::ai_providers::save(&self.provider_store);
             self.provider_codex_confirm = None;
             self.provider_status = None;
+            self.npu_runtime_seq = self.npu_runtime_seq.wrapping_add(1);
+            self.npu_runtime_operation = None;
             self.sync_provider_inputs(window, cx);
+            if kind == crate::ai_providers::ProviderKind::OpenVinoNpu {
+                self.run_npu_runtime_operation(NpuRuntimeOperation::Refresh, cx);
+            }
             cx.notify();
         }
     }
@@ -166,6 +177,164 @@ impl SettingsPane {
         cx.notify();
     }
 
+    fn active_npu_runtime_target(&self) -> Option<(String, String)> {
+        let index = self.active_provider_index()?;
+        let provider = self.provider_store.providers.get(index)?;
+        (provider.kind == crate::ai_providers::ProviderKind::OpenVinoNpu)
+            .then(|| (provider.model.clone(), provider.base_url.clone()))
+    }
+
+    fn run_npu_runtime_operation(
+        &mut self,
+        operation: NpuRuntimeOperation,
+        cx: &mut Context<Self>,
+    ) {
+        if self.npu_runtime_operation.is_some() {
+            return;
+        }
+        let Some((model, base_url)) = self.active_npu_runtime_target() else { return };
+        self.npu_runtime_seq = self.npu_runtime_seq.wrapping_add(1);
+        let sequence = self.npu_runtime_seq;
+        self.npu_runtime_operation = Some(operation);
+
+        let task = cx.background_executor().spawn(async move {
+            match operation {
+                NpuRuntimeOperation::Refresh => Ok(crate::npu_runtime::inspect(&model, &base_url)),
+                NpuRuntimeOperation::Start => crate::npu_runtime::start(&model, &base_url),
+                NpuRuntimeOperation::Stop => crate::npu_runtime::stop(&model, &base_url),
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |pane, cx| {
+                if sequence != pane.npu_runtime_seq {
+                    return;
+                }
+                pane.npu_runtime_operation = None;
+                pane.npu_runtime_status = Some(match result {
+                    Ok(status) => status,
+                    Err(error) => crate::npu_runtime::NpuRuntimeStatus::Error(error),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn render_npu_runtime_controls(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        use crate::i18n::Message;
+        use crate::npu_runtime::NpuRuntimeStatus;
+
+        let language = crate::gpui_shell::config::ui_language(cx);
+        let theme = cx.theme();
+        let status = self.npu_runtime_status.as_ref();
+        let (status_text, status_color) = match status {
+            None => (
+                language.text(Message::SettingsNpuRuntimeStatusUnknown).to_owned(),
+                theme.muted_foreground,
+            ),
+            Some(NpuRuntimeStatus::Unsupported) => (
+                language.text(Message::SettingsNpuRuntimeStatusUnsupported).to_owned(),
+                theme.muted_foreground,
+            ),
+            Some(NpuRuntimeStatus::NotInstalled) => (
+                language.text(Message::SettingsNpuRuntimeStatusNotInstalled).to_owned(),
+                theme.danger,
+            ),
+            Some(NpuRuntimeStatus::NotConfigured) => (
+                language.text(Message::SettingsNpuRuntimeStatusNotConfigured).to_owned(),
+                theme.danger,
+            ),
+            Some(NpuRuntimeStatus::Stopped) => (
+                language.text(Message::SettingsNpuRuntimeStatusStopped).to_owned(),
+                theme.muted_foreground,
+            ),
+            Some(NpuRuntimeStatus::Running { managed: false, .. }) => (
+                language.text(Message::SettingsNpuRuntimeStatusRunningUnmanaged).to_owned(),
+                theme.success,
+            ),
+            Some(NpuRuntimeStatus::Running { model_available: true, .. }) => (
+                language.text(Message::SettingsNpuRuntimeStatusRunning).to_owned(),
+                theme.success,
+            ),
+            Some(NpuRuntimeStatus::Running { model_available: false, .. }) => (
+                language
+                    .text(Message::SettingsNpuRuntimeStatusRunningModelUnavailable)
+                    .to_owned(),
+                theme.danger,
+            ),
+            Some(NpuRuntimeStatus::Error(error)) => (
+                language.format(
+                    Message::SettingsNpuRuntimeStatusError,
+                    &[("error", error.as_str())],
+                ),
+                theme.danger,
+            ),
+        };
+        let busy = self.npu_runtime_operation.is_some();
+        let start_label = if self.npu_runtime_operation == Some(NpuRuntimeOperation::Start) {
+            language.text(Message::SettingsNpuRuntimeActionStarting)
+        } else {
+            language.text(Message::SettingsNpuRuntimeActionStart)
+        };
+        let stop_label = if self.npu_runtime_operation == Some(NpuRuntimeOperation::Stop) {
+            language.text(Message::SettingsNpuRuntimeActionStopping)
+        } else {
+            language.text(Message::SettingsNpuRuntimeActionStop)
+        };
+        let refresh_label = if self.npu_runtime_operation == Some(NpuRuntimeOperation::Refresh) {
+            language.text(Message::SettingsNpuRuntimeActionRefreshing)
+        } else {
+            language.text(Message::SettingsNpuRuntimeActionRefresh)
+        };
+        let running = status.is_some_and(NpuRuntimeStatus::is_running);
+        let managed_running = status.is_some_and(NpuRuntimeStatus::is_managed_running);
+
+        self.row(
+            language.text(Message::SettingsNpuRuntimeTitle),
+            language.text(Message::SettingsNpuRuntimeDescription),
+            v_flex()
+                .w(px(330.0))
+                .gap_2()
+                .child(div().text_sm().text_color(status_color).child(status_text))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            NebulaButton::new("npu-runtime-refresh")
+                                .label(refresh_label)
+                                .disabled(busy)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.run_npu_runtime_operation(
+                                        NpuRuntimeOperation::Refresh,
+                                        cx,
+                                    );
+                                })),
+                        )
+                        .child(
+                            NebulaButton::new("npu-runtime-start")
+                                .label(start_label)
+                                .disabled(busy || running)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.run_npu_runtime_operation(NpuRuntimeOperation::Start, cx);
+                                })),
+                        )
+                        .child(
+                            NebulaButton::new("npu-runtime-stop")
+                                .label(stop_label)
+                                .disabled(busy || !managed_running)
+                                .danger()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.run_npu_runtime_operation(NpuRuntimeOperation::Stop, cx);
+                                })),
+                        ),
+                ),
+            cx,
+        )
+        .into_any_element()
+    }
+
     pub(super) fn apply_provider_to_codex(&mut self, cx: &mut Context<Self>) {
         if !self.save_provider_metadata(cx) {
             return;
@@ -244,6 +413,9 @@ impl SettingsPane {
             let enabled = provider.enabled;
             let goals = provider.codex_goals;
             let remote = provider.codex_remote_compaction;
+            let npu_runtime_controls =
+                (provider.kind == crate::ai_providers::ProviderKind::OpenVinoNpu)
+                    .then(|| self.render_npu_runtime_controls(cx));
             editor = editor
                 .child(
                     self.row(
@@ -326,6 +498,7 @@ impl SettingsPane {
                         cx,
                     ),
                 )
+                .children(npu_runtime_controls)
                 .child(
                     self.row(
                         "Codex Goals",
