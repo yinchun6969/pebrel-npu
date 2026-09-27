@@ -1294,6 +1294,7 @@ fn localized_item_label(item: &PaletteItem, language: super::UiLanguage) -> &'st
         TogglePanelResize => "Drag to resize panels",
         OpenDirectoryPicker => "New terminal in a frequent directory...",
         OpenAiSessionPicker => "Open quickly...",
+        OpenAiChat => "Pebrel AI Chat...",
         CloseTab => "Close tab",
         NextTab => "Next tab",
         PrevTab => "Previous tab",
