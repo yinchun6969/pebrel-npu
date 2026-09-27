@@ -36,6 +36,8 @@ impl SettingsPane {
             let _ = crate::ai_providers::save(&self.provider_store);
             self.provider_codex_confirm = None;
             self.provider_status = None;
+            self.provider_key_seq = self.provider_key_seq.wrapping_add(1);
+            self.provider_key_prompt_running = false;
             self.npu_runtime_seq = self.npu_runtime_seq.wrapping_add(1);
             self.npu_runtime_operation = None;
             self.sync_provider_inputs(window, cx);
@@ -128,18 +130,60 @@ impl SettingsPane {
     }
 
     pub(super) fn prompt_provider_key(&mut self, cx: &mut Context<Self>) {
-        let Some(index) = self.active_provider_index() else { return };
-        let provider = &mut self.provider_store.providers[index];
-        match crate::ai_providers::prompt_and_store_api_key(provider) {
-            Ok(true) => {
-                self.provider_status = Some(ProviderStatus::ApiKeySaved);
-                if let Err(error) = crate::ai_providers::save(&self.provider_store) {
-                    self.provider_status = Some(ProviderStatus::Error(error.to_string()));
-                }
-            },
-            Ok(false) => {},
-            Err(error) => self.provider_status = Some(ProviderStatus::Error(error.to_string())),
+        if self.provider_key_prompt_running {
+            return;
         }
+        let Some(index) = self.active_provider_index() else { return };
+        let provider = self.provider_store.providers[index].clone();
+        let provider_id = provider.id.clone();
+
+        self.provider_key_seq = self.provider_key_seq.wrapping_add(1);
+        let sequence = self.provider_key_seq;
+        self.provider_key_prompt_running = true;
+
+        // The native Windows credential UI is modal and blocking. Running it
+        // inside the GPUI click callback re-enters the app while its RefCell is
+        // still borrowed and can panic with "RefCell already borrowed".
+        let task = cx.background_executor().spawn(async move {
+            let mut provider = provider;
+            let result = crate::ai_providers::prompt_and_store_api_key(&mut provider);
+            (provider, result)
+        });
+
+        cx.spawn(async move |this, cx| {
+            let (updated_provider, result) = task.await;
+            let _ = this.update(cx, |pane, cx| {
+                if sequence != pane.provider_key_seq
+                    || provider_id != pane.provider_store.active_id
+                {
+                    return;
+                }
+                pane.provider_key_prompt_running = false;
+                match result {
+                    Ok(true) => {
+                        if let Some(current) = pane
+                            .provider_store
+                            .providers
+                            .iter_mut()
+                            .find(|provider| provider.id == provider_id)
+                        {
+                            current.api_key_set = updated_provider.api_key_set;
+                            current.api_key_hint = updated_provider.api_key_hint;
+                        }
+                        pane.provider_status = Some(ProviderStatus::ApiKeySaved);
+                        if let Err(error) = crate::ai_providers::save(&pane.provider_store) {
+                            pane.provider_status = Some(ProviderStatus::Error(error.to_string()));
+                        }
+                    },
+                    Ok(false) => {},
+                    Err(error) => {
+                        pane.provider_status = Some(ProviderStatus::Error(error.to_string()));
+                    },
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -495,11 +539,14 @@ impl SettingsPane {
                             )
                             .child(
                                 NebulaButton::new("provider-set-key")
-                                    .label(if provider.api_key_set {
+                                    .label(if self.provider_key_prompt_running {
+                                        language.pick("等待输入…", "Waiting...")
+                                    } else if provider.api_key_set {
                                         language.pick("替换…", "Replace...")
                                     } else {
                                         language.pick("设置…", "Set...")
                                     })
+                                    .disabled(self.provider_key_prompt_running)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.prompt_provider_key(cx);
                                     })),
