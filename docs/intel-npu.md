@@ -78,6 +78,11 @@ Runtime files are stored under:
 .\scripts\pebrel-npu.ps1 start
 .\scripts\pebrel-npu.ps1 stop
 
+# Create verified desktop shortcuts:
+# "Start Pebrel NPU" starts OVMS if needed and then opens Pebrel.
+# "Stop Pebrel NPU" stops the managed OVMS process tree.
+.\scripts\pebrel-npu.ps1 shortcut -PebrelExe ".\target\release\pebrel.exe"
+
 # Send a test generation
 .\scripts\pebrel-npu.ps1 test
 ```
@@ -97,6 +102,11 @@ Settings -> AI Providers -> Intel NPU (OpenVINO)
 ```
 
 The preset should already contain the local endpoint and model name. No API key is required.
+
+When this provider is selected, the Settings page also shows **Intel NPU runtime** controls:
+**Refresh**, **Start NPU**, and **Stop NPU**. Runtime probing and process operations run off
+the UI thread. Pebrel only stops an OVMS process that has a managed PID; an externally
+started OVMS instance is shown as external/unmanaged and is not force-killed.
 
 Pebrel's existing AI assistant can then use the selected provider for local terminal-error
 analysis and command suggestions.
@@ -146,6 +156,18 @@ OpenVINO/Qwen3-8B-int4-cw-ov
 ```
 
 不需要 API Key。
+
+此供应商页会显示 **Intel NPU 运行服务** 状态，并提供 **刷新状态 / 启动 NPU /
+停止 NPU**。Pebrel 只会停止自己管理并记录 PID 的 OVMS 进程；如果检测到外部启动的
+OVMS，只显示状态，不会强制结束。
+
+首次完成模型准备后，也可以创建桌面快捷方式：
+
+```powershell
+.\scripts\pebrel-npu.ps1 shortcut -PebrelExe ".\target\release\pebrel.exe"
+```
+
+会生成 **Start Pebrel NPU** 与 **Stop Pebrel NPU** 两个快捷方式。
 
 诊断命令：
 
