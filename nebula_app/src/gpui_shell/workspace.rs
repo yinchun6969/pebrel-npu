@@ -46,6 +46,7 @@ use gpui_component::notification::Notification;
 use nebula_split::{DIVIDER_GAP, HIT_SLOP, RemoveOutcome, SplitDirection, SplitNav, SplitTree};
 
 mod agents;
+mod ai_chat;
 mod closing;
 mod command_manager;
 mod keyboard_bindings;
@@ -106,6 +107,7 @@ gpui::actions!(
         CloseActiveTerminal,
         ToggleSidebar,
         OpenSettings,
+        OpenAiChat,
         ToggleCommandPalette,
         CloseCommandPalette,
         ToggleShellPicker,
@@ -2360,6 +2362,7 @@ impl NebulaWorkspace {
                 self.focus_active(window, cx);
             },
             PaletteAction::OpenSettings => self.open_settings(window, cx),
+            PaletteAction::OpenAiChat => self.open_native_ai_chat_dialog(None, window, cx),
             PaletteAction::ToggleFilesPanel => {
                 self.toggle_file_tree(cx);
                 self.focus_active(window, cx);
@@ -3193,6 +3196,9 @@ impl Render for NebulaWorkspace {
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.toggle_settings(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenAiChat, window, cx| {
+                this.open_native_ai_chat_dialog(None, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
                 this.toggle_command_palette(window, cx);
